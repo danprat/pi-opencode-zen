@@ -1,53 +1,73 @@
 # pi-opencode-zen
 
-OpenCode Zen provider extension for pi.
+OpenCode Zen provider extension for pi and Pi-Bolt.
 
 ## Install
 
 ### Option 1: From GitHub (Branch `fix/pi-compat-import`)
 
-To install the latest tested fix branch directly:
+To install the latest tested branch directly:
 
 ```bash
-# Clone the fix branch
+# Clone the repository
 git clone -b fix/pi-compat-import https://github.com/danprat/pi-opencode-zen.git
 
-# Install into pi
+# Install into pi or Pi-Bolt
 pi install ./pi-opencode-zen
+# or
+pi-bolt install ./pi-opencode-zen
 ```
 
 Or install directly from the git repository:
 
 ```bash
 pi install git:github.com/danprat/pi-opencode-zen
+# or
+pi-bolt install git:github.com/danprat/pi-opencode-zen
 ```
 
 ### Option 2: From npm (Official Release)
 
 ```bash
 pi install npm:@ravshansbox/pi-opencode-zen
+# or
+pi-bolt install npm:@ravshansbox/pi-opencode-zen
+```
+
+### Option 3: Compile into Pi-Bolt Binary (Ahead-of-Time / AOT)
+
+To compile this extension directly into the Pi-Bolt executable for instant startup and native machine code execution (as detailed in [PLUGINS.md](https://github.com/opensec-git/Pi-Bolt/blob/pi-bolt/docs/PLUGINS.md)):
+
+```bash
+scripts/build-pi.sh --plugins /path/to/pi-opencode-zen/plugins.ts --out out/pi-bolt-plugins
 ```
 
 ## Usage
 
-Pi loads the provider from `./index.ts` and registers an `opencode-zen` provider that exposes OpenCode Zen models.
+Pi and Pi-Bolt load the provider from `./index.ts` and register an `opencode-zen` provider that exposes OpenCode Zen models.
 
-The extension:
+### Zero-Configuration Default (`public` mode)
 
-- supports anonymous mode by using the API key value `public`
-- adds OpenCode request headers on every `opencode-zen` provider request:
+New users can start using OpenCode Zen immediately without configuring an API key. If no key is set in `OPENCODE_API_KEY` or `~/.pi/agent/auth.json`, the extension automatically defaults to `public` mode, instantly exposing the current active free-tier models (such as `big-pickle`, `muse-spark-1.3-contributor-free`, etc.).
+
+### Features
+
+- **Automatic `public` mode fallback**: zero setup required for new users to use free-tier models immediately.
+- **Dynamic model discovery**: checks the live OpenCode Zen API and `models.dev` dynamically on launch, ensuring newly added models are discovered and deprecated models are removed.
+- **Resilient offline cache**: persists discovered models to `~/.pi/agent/cache/opencode-zen-models.json` with a bounded timeout, ensuring Pi-Bolt starts reliably even when offline.
+- **Pi-Bolt AOT optimisations**: monomorphic object shapes, module-level constant hoisting, and streamlined ID generation for maximum runtime performance.
+- **Request headers**: adds OpenCode request headers on every `opencode-zen` request:
   - `x-opencode-client`
   - `x-opencode-session`
   - `x-opencode-project`
   - `x-opencode-request`
-- sets the OpenCode CLI-style `User-Agent`
-- attaches required core tools (`bash`, `read`) to satisfy the OpenCode free-tier validation gate
+- **Gate tools**: attaches required core tools (`bash`, `read`) to satisfy the OpenCode validation gate.
 
-### Model filtering and protocol routing
+### Model Filtering and Protocol Routing
 
 This extension mirrors OpenCode CLI behaviour as closely as possible:
 
-- it fetches live visible model IDs dynamically from the OpenCode Zen API
+- it fetches live visible model IDs dynamically from the OpenCode Zen API (`https://opencode.ai/zen/v1/models`)
 - it synchronises model specifications (context window, token limits, modalities) from `models.dev`
 - it filters out models with `status === "deprecated"`
 - in anonymous/public mode (`key = "public"`), it automatically admits all free-tier and zero-cost models
@@ -69,11 +89,9 @@ OpenCode metadata source:
 curl https://models.dev/api.json
 ```
 
-The Zen `/models` endpoint does not include pricing or deprecation metadata, so the extension combines both sources.
-
 ## Configuration
 
-Get an API key from OpenCode Zen, then configure pi in one of these ways.
+To use your own OpenCode Zen API key instead of the public default:
 
 ### Environment variable
 
@@ -81,15 +99,9 @@ Get an API key from OpenCode Zen, then configure pi in one of these ways.
 export OPENCODE_API_KEY=your-real-key
 ```
 
-To use anonymous mode for OpenCode Zen free/public models:
+### pi auth storage / `/login`
 
-```bash
-export OPENCODE_API_KEY=public
-```
-
-### pi auth storage
-
-Store the key in `~/.pi/agent/auth.json` under the `opencode-zen` provider name:
+You can log in interactively via `/login opencode-zen` in the TUI, or store the key in `~/.pi/agent/auth.json`:
 
 ```json
 {
@@ -100,7 +112,11 @@ Store the key in `~/.pi/agent/auth.json` under the `opencode-zen` provider name:
 }
 ```
 
-Use `"key": "public"` for anonymous mode.
+### Command-line argument
+
+```bash
+pi-bolt --provider opencode-zen --model claude-sonnet-4-6 --api-key your-real-key -p "hello"
+```
 
 ## Development
 

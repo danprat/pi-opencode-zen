@@ -1,27 +1,27 @@
+import { Type } from '@earendil-works/pi-ai';
 import {
   type Api,
   type AssistantMessageEventStream,
   type Model,
   type SimpleStreamOptions,
-  type SystemMessage,
   type Tool,
   type TranscriptContext,
-  Type,
   anthropicMessagesApi,
   googleGenerativeAIApi,
   openAICompletionsApi,
   openAIResponsesApi,
 } from '@earendil-works/pi-ai/compat';
+import type { RefreshModelsContext } from '@earendil-works/pi-ai';
 import type { ExtensionAPI, ProviderModelConfig } from '@earendil-works/pi-coding-agent';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 type Backend =
   'anthropic-messages' | 'google-generative-ai' | 'openai-completions' | 'openai-responses';
 
 interface EndpointConfig {
-  api: Backend;
-  baseUrl: string;
+  readonly api: Backend;
+  readonly baseUrl: string;
 }
 
 interface ModelsDevModelInfo {
@@ -46,6 +46,23 @@ interface ModelsDevModelInfo {
 const API_KEY = 'OPENCODE_API_KEY';
 const BASE_URL = 'https://opencode.ai/zen/v1';
 const MODELS_DEV_URL = 'https://models.dev/api.json';
+
+const OPENAI_RESPONSES_ENDPOINT: EndpointConfig = Object.freeze({
+  api: 'openai-responses',
+  baseUrl: BASE_URL,
+});
+const ANTHROPIC_MESSAGES_ENDPOINT: EndpointConfig = Object.freeze({
+  api: 'anthropic-messages',
+  baseUrl: BASE_URL,
+});
+const GOOGLE_GENERATIVE_AI_ENDPOINT: EndpointConfig = Object.freeze({
+  api: 'google-generative-ai',
+  baseUrl: BASE_URL,
+});
+const OPENAI_COMPLETIONS_ENDPOINT: EndpointConfig = Object.freeze({
+  api: 'openai-completions',
+  baseUrl: BASE_URL,
+});
 
 // Full model list - updated from models.dev
 const allModels = [
@@ -374,6 +391,24 @@ const allModels = [
     maxTokens: 131072,
   },
   {
+    id: 'muse-spark-1.3-contributor-free',
+    name: 'Muse Spark 1.3 Contributor Free',
+    reasoning: true,
+    input: ['text'],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128000,
+    maxTokens: 32000,
+  },
+  {
+    id: 'muse-spark-1.2-contributor-free',
+    name: 'Muse Spark 1.2 Contributor Free',
+    reasoning: true,
+    input: ['text'],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128000,
+    maxTokens: 32000,
+  },
+  {
     id: 'nemotron-3-super-free',
     name: 'Nemotron 3 Super Free',
     reasoning: true,
@@ -404,80 +439,128 @@ const allModels = [
 
 const endpoints: Record<string, EndpointConfig> = {
   // GPT models - openai-responses
-  'gpt-5.4': { api: 'openai-responses', baseUrl: BASE_URL },
-  'gpt-5.4-pro': { api: 'openai-responses', baseUrl: BASE_URL },
-  'gpt-5.4-mini': { api: 'openai-responses', baseUrl: BASE_URL },
-  'gpt-5.4-nano': { api: 'openai-responses', baseUrl: BASE_URL },
-  'gpt-5.3-codex-spark': { api: 'openai-responses', baseUrl: BASE_URL },
-  'gpt-5.3-codex': { api: 'openai-responses', baseUrl: BASE_URL },
-  'gpt-5.2': { api: 'openai-responses', baseUrl: BASE_URL },
-  'gpt-5.2-codex': { api: 'openai-responses', baseUrl: BASE_URL },
-  'gpt-5.1': { api: 'openai-responses', baseUrl: BASE_URL },
-  'gpt-5.1-codex-max': { api: 'openai-responses', baseUrl: BASE_URL },
-  'gpt-5.1-codex': { api: 'openai-responses', baseUrl: BASE_URL },
-  'gpt-5.1-codex-mini': { api: 'openai-responses', baseUrl: BASE_URL },
-  'gpt-5': { api: 'openai-responses', baseUrl: BASE_URL },
-  'gpt-5-codex': { api: 'openai-responses', baseUrl: BASE_URL },
-  'gpt-5-nano': { api: 'openai-responses', baseUrl: BASE_URL },
+  'gpt-5.4': OPENAI_RESPONSES_ENDPOINT,
+  'gpt-5.4-pro': OPENAI_RESPONSES_ENDPOINT,
+  'gpt-5.4-mini': OPENAI_RESPONSES_ENDPOINT,
+  'gpt-5.4-nano': OPENAI_RESPONSES_ENDPOINT,
+  'gpt-5.3-codex-spark': OPENAI_RESPONSES_ENDPOINT,
+  'gpt-5.3-codex': OPENAI_RESPONSES_ENDPOINT,
+  'gpt-5.2': OPENAI_RESPONSES_ENDPOINT,
+  'gpt-5.2-codex': OPENAI_RESPONSES_ENDPOINT,
+  'gpt-5.1': OPENAI_RESPONSES_ENDPOINT,
+  'gpt-5.1-codex-max': OPENAI_RESPONSES_ENDPOINT,
+  'gpt-5.1-codex': OPENAI_RESPONSES_ENDPOINT,
+  'gpt-5.1-codex-mini': OPENAI_RESPONSES_ENDPOINT,
+  'gpt-5': OPENAI_RESPONSES_ENDPOINT,
+  'gpt-5-codex': OPENAI_RESPONSES_ENDPOINT,
+  'gpt-5-nano': OPENAI_RESPONSES_ENDPOINT,
   // Claude models - anthropic-messages
-  'claude-opus-4-6': { api: 'anthropic-messages', baseUrl: BASE_URL },
-  'claude-opus-4-5': { api: 'anthropic-messages', baseUrl: BASE_URL },
-  'claude-opus-4-1': { api: 'anthropic-messages', baseUrl: BASE_URL },
-  'claude-sonnet-4-6': { api: 'anthropic-messages', baseUrl: BASE_URL },
-  'claude-sonnet-4-5': { api: 'anthropic-messages', baseUrl: BASE_URL },
-  'claude-sonnet-4': { api: 'anthropic-messages', baseUrl: BASE_URL },
-  'claude-haiku-4-5': { api: 'anthropic-messages', baseUrl: BASE_URL },
-  'claude-3-5-haiku': { api: 'anthropic-messages', baseUrl: BASE_URL },
+  'claude-opus-4-6': ANTHROPIC_MESSAGES_ENDPOINT,
+  'claude-opus-4-5': ANTHROPIC_MESSAGES_ENDPOINT,
+  'claude-opus-4-1': ANTHROPIC_MESSAGES_ENDPOINT,
+  'claude-sonnet-4-6': ANTHROPIC_MESSAGES_ENDPOINT,
+  'claude-sonnet-4-5': ANTHROPIC_MESSAGES_ENDPOINT,
+  'claude-sonnet-4': ANTHROPIC_MESSAGES_ENDPOINT,
+  'claude-haiku-4-5': ANTHROPIC_MESSAGES_ENDPOINT,
+  'claude-3-5-haiku': ANTHROPIC_MESSAGES_ENDPOINT,
   // Gemini models - google-generative-ai
-  'gemini-3.1-pro': { api: 'google-generative-ai', baseUrl: BASE_URL },
-  'gemini-3-pro': { api: 'google-generative-ai', baseUrl: BASE_URL },
-  'gemini-3-flash': { api: 'google-generative-ai', baseUrl: BASE_URL },
+  'gemini-3.1-pro': GOOGLE_GENERATIVE_AI_ENDPOINT,
+  'gemini-3-pro': GOOGLE_GENERATIVE_AI_ENDPOINT,
+  'gemini-3-flash': GOOGLE_GENERATIVE_AI_ENDPOINT,
   // Muse models - openai-responses
-  'muse-spark-1.3': { api: 'openai-responses', baseUrl: BASE_URL },
-  'muse-spark-1.3-contributor-free': { api: 'openai-responses', baseUrl: BASE_URL },
-  'muse-spark-1.2': { api: 'openai-responses', baseUrl: BASE_URL },
-  'muse-spark-1.2-contributor-free': { api: 'openai-responses', baseUrl: BASE_URL },
+  'muse-spark-1.3': OPENAI_RESPONSES_ENDPOINT,
+  'muse-spark-1.3-contributor-free': OPENAI_RESPONSES_ENDPOINT,
+  'muse-spark-1.2': OPENAI_RESPONSES_ENDPOINT,
+  'muse-spark-1.2-contributor-free': OPENAI_RESPONSES_ENDPOINT,
   // GLM models - openai-completions
-  'glm-5': { api: 'openai-completions', baseUrl: BASE_URL },
-  'glm-4.7': { api: 'openai-completions', baseUrl: BASE_URL },
-  'glm-4.6': { api: 'openai-completions', baseUrl: BASE_URL },
+  'glm-5': OPENAI_COMPLETIONS_ENDPOINT,
+  'glm-4.7': OPENAI_COMPLETIONS_ENDPOINT,
+  'glm-4.6': OPENAI_COMPLETIONS_ENDPOINT,
   // MiniMax models - openai-completions
-  'minimax-m2.5': { api: 'openai-completions', baseUrl: BASE_URL },
-  'minimax-m2.5-free': { api: 'openai-completions', baseUrl: BASE_URL },
-  'minimax-m2.1': { api: 'openai-completions', baseUrl: BASE_URL },
+  'minimax-m2.5': OPENAI_COMPLETIONS_ENDPOINT,
+  'minimax-m2.5-free': OPENAI_COMPLETIONS_ENDPOINT,
+  'minimax-m2.1': OPENAI_COMPLETIONS_ENDPOINT,
   // Kimi models - openai-completions
-  'kimi-k2.5': { api: 'openai-completions', baseUrl: BASE_URL },
-  'kimi-k2': { api: 'openai-completions', baseUrl: BASE_URL },
-  'kimi-k2-thinking': { api: 'openai-completions', baseUrl: BASE_URL },
+  'kimi-k2.5': OPENAI_COMPLETIONS_ENDPOINT,
+  'kimi-k2': OPENAI_COMPLETIONS_ENDPOINT,
+  'kimi-k2-thinking': OPENAI_COMPLETIONS_ENDPOINT,
   // Other models - openai-completions
-  'big-pickle': { api: 'openai-completions', baseUrl: BASE_URL },
-  'trinity-large-preview-free': {
-    api: 'openai-completions',
-    baseUrl: BASE_URL,
-  },
-  'qwen3.6-plus-free': { api: 'openai-completions', baseUrl: BASE_URL },
-  'nemotron-3-super-free': { api: 'openai-completions', baseUrl: BASE_URL },
+  'big-pickle': OPENAI_COMPLETIONS_ENDPOINT,
+  'trinity-large-preview-free': OPENAI_COMPLETIONS_ENDPOINT,
+  'qwen3.6-plus-free': OPENAI_COMPLETIONS_ENDPOINT,
+  'nemotron-3-super-free': OPENAI_COMPLETIONS_ENDPOINT,
 };
 
-function getConfiguredApiKey(): string | undefined {
+function createModelConfig(
+  id: string,
+  name: string,
+  reasoning: boolean,
+  input: ('text' | 'image')[],
+  cost: { input: number; output: number; cacheRead: number; cacheWrite: number },
+  contextWindow: number,
+  maxTokens: number,
+): ProviderModelConfig {
+  return {
+    id,
+    name,
+    reasoning,
+    input,
+    cost,
+    contextWindow,
+    maxTokens,
+  };
+}
+
+const STATIC_MODELS: ProviderModelConfig[] = allModels.map((m) =>
+  createModelConfig(
+    m.id,
+    m.name,
+    m.reasoning,
+    (m.input as readonly string[]).filter(
+      (value): value is 'text' | 'image' => value === 'text' || value === 'image',
+    ),
+    { ...m.cost },
+    m.contextWindow,
+    m.maxTokens,
+  ),
+);
+
+function getEffectiveApiKey(credentialKey?: string): string {
+  if (credentialKey && credentialKey.trim().length > 0) {
+    return credentialKey.trim();
+  }
   const env = process.env[API_KEY]?.trim();
   if (env) return env;
 
   try {
-    const authPath = join(process.env['HOME'] ?? '', '.pi', 'agent', 'auth.json');
-    const auth = JSON.parse(readFileSync(authPath, 'utf8')) as Record<string, { key?: string }>;
-    const key = auth?.['opencode-zen']?.key?.trim();
-    return key || undefined;
+    const agentDir =
+      process.env['PI_AGENT_DIR'] ||
+      (process.env['HOME'] ? join(process.env['HOME'], '.pi', 'agent') : undefined);
+    if (agentDir) {
+      const authPath = join(agentDir, 'auth.json');
+      const auth = JSON.parse(readFileSync(authPath, 'utf8')) as Record<
+        string,
+        { key?: string; access?: string }
+      >;
+      const stored = auth?.['opencode-zen']?.key?.trim() || auth?.['opencode-zen']?.access?.trim();
+      if (stored) return stored;
+    }
   } catch {
-    return undefined;
+    // Ignore fallback auth reading errors
   }
+  return 'public';
 }
 
-async function fetchVisibleModelIds(apiKey: string): Promise<Set<string> | undefined> {
+async function fetchVisibleModelIds(
+  apiKey: string,
+  signal?: AbortSignal,
+): Promise<Set<string> | undefined> {
   try {
-    const response = await fetch(`${BASE_URL}/models`, {
+    const init: RequestInit = {
       headers: { Authorization: `Bearer ${apiKey}`, ...opencodeHeaders() },
-    });
+    };
+    if (signal) init.signal = signal;
+    const response = await fetch(`${BASE_URL}/models`, init);
     if (!response.ok) return undefined;
     const json = (await response.json()) as { data?: Array<{ id?: string }> };
     return new Set((json.data ?? []).map((m) => m.id).filter((id): id is string => Boolean(id)));
@@ -486,9 +569,13 @@ async function fetchVisibleModelIds(apiKey: string): Promise<Set<string> | undef
   }
 }
 
-async function fetchModelsDevInfo(): Promise<Record<string, ModelsDevModelInfo> | undefined> {
+async function fetchModelsDevInfo(
+  signal?: AbortSignal,
+): Promise<Record<string, ModelsDevModelInfo> | undefined> {
   try {
-    const response = await fetch(MODELS_DEV_URL);
+    const init: RequestInit = {};
+    if (signal) init.signal = signal;
+    const response = await fetch(MODELS_DEV_URL, init);
     if (!response.ok) return undefined;
     const json = (await response.json()) as {
       opencode?: { models?: Record<string, ModelsDevModelInfo> };
@@ -518,18 +605,21 @@ function getVisibleModels(
   const modelMap = new Map<string, ProviderModelConfig>();
 
   for (const model of allModels) {
-    const input = model.input.filter(
+    const input = (model.input as readonly string[]).filter(
       (value): value is 'text' | 'image' => value === 'text' || value === 'image',
-    ) as ('text' | 'image')[];
-    modelMap.set(model.id, {
-      id: model.id,
-      name: model.name,
-      reasoning: model.reasoning,
-      input,
-      cost: { ...model.cost },
-      contextWindow: model.contextWindow,
-      maxTokens: model.maxTokens,
-    });
+    );
+    modelMap.set(
+      model.id,
+      createModelConfig(
+        model.id,
+        model.name,
+        model.reasoning,
+        input,
+        { ...model.cost },
+        model.contextWindow,
+        model.maxTokens,
+      ),
+    );
   }
 
   if (visibleIds) {
@@ -539,30 +629,36 @@ function getVisibleModels(
         const input = (dev.modalities?.input ?? ['text']).filter(
           (value): value is 'text' | 'image' => value === 'text' || value === 'image',
         );
-        modelMap.set(id, {
+        modelMap.set(
           id,
-          name: dev.name || id,
-          reasoning: Boolean(dev.reasoning),
-          input: input.length > 0 ? input : ['text'],
-          cost: {
-            input: dev.cost?.input ?? 0,
-            output: dev.cost?.output ?? 0,
-            cacheRead: dev.cost?.cache_read ?? 0,
-            cacheWrite: dev.cost?.cache_write ?? 0,
-          },
-          contextWindow: dev.limit?.context ?? 200000,
-          maxTokens: dev.limit?.output ?? 64000,
-        });
-      } else if (!modelMap.has(id) && (id.endsWith('-free') || id === 'big-pickle')) {
-        modelMap.set(id, {
+          createModelConfig(
+            id,
+            dev.name || id,
+            Boolean(dev.reasoning),
+            input.length > 0 ? input : ['text'],
+            {
+              input: dev.cost?.input ?? 0,
+              output: dev.cost?.output ?? 0,
+              cacheRead: dev.cost?.cache_read ?? 0,
+              cacheWrite: dev.cost?.cache_write ?? 0,
+            },
+            dev.limit?.context ?? 200000,
+            dev.limit?.output ?? 64000,
+          ),
+        );
+      } else if (!modelMap.has(id)) {
+        modelMap.set(
           id,
-          name: id,
-          reasoning: true,
-          input: ['text'],
-          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-          contextWindow: 200000,
-          maxTokens: 64000,
-        });
+          createModelConfig(
+            id,
+            id,
+            true,
+            ['text'],
+            { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+            200000,
+            64000,
+          ),
+        );
       }
     }
   }
@@ -585,76 +681,86 @@ function getVisibleModels(
 }
 
 const BASE62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+const HEX_DIGITS = '0123456789abcdef';
 
 function canonicalId(prefix: 'ses_' | 'msg_'): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(32));
-  const hexPart = Array.from(bytes.subarray(0, 6), (b) => b.toString(16).padStart(2, '0')).join('');
-  const b62Part = Array.from(bytes.subarray(6, 20), (b) => BASE62[b % 62]).join('');
-  return `${prefix}${hexPart}${b62Part}`;
+  const bytes = crypto.getRandomValues(new Uint8Array(20));
+  let result = prefix;
+  for (let i = 0; i < 6; i++) {
+    const b = bytes[i] ?? 0;
+    result += (HEX_DIGITS[(b >> 4) & 0x0f] ?? '0') + (HEX_DIGITS[b & 0x0f] ?? '0');
+  }
+  for (let i = 6; i < 20; i++) {
+    result += BASE62[(bytes[i] ?? 0) % 62] ?? '0';
+  }
+  return result;
 }
+
+const SESSION_ID = canonicalId('ses_');
 
 function opencodeHeaders(): Record<string, string> {
   return {
     'User-Agent': 'opencode/1.18.31',
     'x-opencode-client': 'cli',
-    'x-opencode-session': canonicalId('ses_'),
+    'x-opencode-session': SESSION_ID,
     'x-opencode-request': canonicalId('msg_'),
     'x-opencode-project': 'global',
     Accept: 'text/event-stream',
   };
 }
 
+const GATE_TOOLS: readonly Tool[] = Object.freeze([
+  {
+    name: 'bash',
+    description: 'Execute bash command',
+    parameters: Type.Object({ command: Type.String() }),
+  },
+  {
+    name: 'read',
+    description: 'Read file',
+    parameters: Type.Object({ path: Type.String() }),
+  },
+]);
+
 function ensureOpencodeGateTools(context: TranscriptContext): TranscriptContext {
   const messages = [...context.messages];
   const first = messages[0];
-  const gateTools: Tool[] = [
-    {
-      name: 'bash',
-      description: 'Execute bash command',
-      parameters: Type.Object({ command: Type.String() }),
-    },
-    {
-      name: 'read',
-      description: 'Read file',
-      parameters: Type.Object({ path: Type.String() }),
-    },
-  ];
 
   if (first && first.role === 'system') {
-    const existing = first.toolsAdded ?? [];
+    const existing = first.toolsAdded;
+    if (!existing || existing.length === 0) {
+      messages[0] = { ...first, toolsAdded: GATE_TOOLS as Tool[] };
+      return { ...context, messages };
+    }
     const existingNames = new Set(existing.map((t) => t.name));
-    const missing = gateTools.filter((t) => !existingNames.has(t.name));
+    const missing = GATE_TOOLS.filter((t) => !existingNames.has(t.name));
     if (missing.length > 0) {
-      const updatedFirst: SystemMessage = {
-        ...first,
-        toolsAdded: [...existing, ...missing],
-      };
-      messages[0] = updatedFirst;
+      messages[0] = { ...first, toolsAdded: [...existing, ...missing] };
     }
   } else {
-    const initialMessage: SystemMessage = {
+    messages.unshift({
       role: 'system',
       content: '',
-      toolsAdded: gateTools,
+      toolsAdded: GATE_TOOLS as Tool[],
       timestamp: 0,
-    };
-    messages.unshift(initialMessage);
+    });
   }
 
   return { ...context, messages };
 }
 
 function getEndpointConfig(modelId: string): EndpointConfig {
-  if (endpoints[modelId]) return endpoints[modelId];
-  if (modelId.startsWith('claude-')) return { api: 'anthropic-messages', baseUrl: BASE_URL };
-  if (modelId.startsWith('gemini-')) return { api: 'google-generative-ai', baseUrl: BASE_URL };
+  const direct = endpoints[modelId];
+  if (direct) return direct;
+  if (modelId.startsWith('claude-')) return ANTHROPIC_MESSAGES_ENDPOINT;
+  if (modelId.startsWith('gemini-')) return GOOGLE_GENERATIVE_AI_ENDPOINT;
   if (modelId.startsWith('gpt-') || modelId.startsWith('muse-')) {
-    return { api: 'openai-responses', baseUrl: BASE_URL };
+    return OPENAI_RESPONSES_ENDPOINT;
   }
-  return { api: 'openai-completions', baseUrl: BASE_URL };
+  return OPENAI_COMPLETIONS_ENDPOINT;
 }
 
-function streamOpencodeZen(
+export function streamOpencodeZen(
   model: Model<Api>,
   context: TranscriptContext,
   options?: SimpleStreamOptions,
@@ -671,8 +777,11 @@ function streamOpencodeZen(
     baseUrl: endpoint.baseUrl,
   } as Model<Api>;
 
+  const resolvedApiKey = options?.apiKey || getEffectiveApiKey();
+
   const wrappedOptions: SimpleStreamOptions = {
     ...options,
+    apiKey: resolvedApiKey,
     headers: { ...options?.headers, ...opencodeHeaders() },
   };
 
@@ -690,18 +799,101 @@ function streamOpencodeZen(
   }
 }
 
-export default async function (pi: ExtensionAPI): Promise<void> {
-  const apiKey = getConfiguredApiKey();
-  const [visibleIds, modelsDevInfo] = await Promise.all([
-    apiKey ? fetchVisibleModelIds(apiKey) : Promise.resolve(undefined),
-    fetchModelsDevInfo(),
-  ]);
+function getCacheFilePath(): string | undefined {
+  try {
+    const agentDir =
+      process.env['PI_AGENT_DIR'] ||
+      (process.env['HOME'] ? join(process.env['HOME'], '.pi', 'agent') : undefined);
+    if (!agentDir) return undefined;
+    return join(agentDir, 'cache', 'opencode-zen-models.json');
+  } catch {
+    return undefined;
+  }
+}
+
+function loadCachedModels(): ProviderModelConfig[] | undefined {
+  const filePath = getCacheFilePath();
+  if (!filePath) return undefined;
+  try {
+    const raw = readFileSync(filePath, 'utf8');
+    const parsed = JSON.parse(raw) as ProviderModelConfig[];
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed;
+    }
+  } catch {
+    // Cache miss or read error
+  }
+  return undefined;
+}
+
+function saveCachedModels(models: ProviderModelConfig[]): void {
+  const filePath = getCacheFilePath();
+  if (!filePath) return;
+  try {
+    const cacheDir = join(filePath, '..');
+    mkdirSync(cacheDir, { recursive: true });
+    writeFileSync(filePath, JSON.stringify(models, null, 2), 'utf8');
+  } catch {
+    // Ignore cache write errors
+  }
+}
+
+async function loadDynamicModels(
+  apiKey?: string,
+  signal?: AbortSignal,
+): Promise<ProviderModelConfig[]> {
+  const abortSignal = signal ?? AbortSignal.timeout(3000);
+  try {
+    const [visibleIds, modelsDevInfo] = await Promise.all([
+      apiKey ? fetchVisibleModelIds(apiKey, abortSignal) : Promise.resolve(undefined),
+      fetchModelsDevInfo(abortSignal),
+    ]);
+
+    const models = getVisibleModels(visibleIds, modelsDevInfo, isPublicMode(apiKey));
+    if (models.length > 0) {
+      saveCachedModels(models);
+      return models;
+    }
+  } catch {
+    // Fall back to cache or static on fetch failure or timeout
+  }
+
+  const cached = loadCachedModels();
+  if (cached && cached.length > 0) {
+    return cached;
+  }
+
+  return STATIC_MODELS;
+}
+
+export async function refreshModels(context: RefreshModelsContext): Promise<ProviderModelConfig[]> {
+  if (!context.allowNetwork || context.signal.aborted) {
+    const cached = loadCachedModels();
+    return cached && cached.length > 0 ? cached : STATIC_MODELS;
+  }
+
+  const apiKey = getEffectiveApiKey(
+    context.credential?.type === 'api_key' ? context.credential.key : undefined,
+  );
+
+  return loadDynamicModels(apiKey, context.signal);
+}
+
+export async function opencodeZen(pi: ExtensionAPI): Promise<void> {
+  const apiKey = getEffectiveApiKey();
+  const models = await loadDynamicModels(apiKey);
+
+  const envKey = process.env[API_KEY]?.trim();
+  const configuredApiKey = envKey ? `$${API_KEY}` : apiKey;
 
   pi.registerProvider('opencode-zen', {
     baseUrl: BASE_URL,
-    apiKey: API_KEY,
+    apiKey: configuredApiKey,
     api: 'openai-completions',
     streamSimple: streamOpencodeZen,
-    models: getVisibleModels(visibleIds, modelsDevInfo, isPublicMode(apiKey)),
+    models,
+    refreshModels,
   });
 }
+
+export default opencodeZen;
