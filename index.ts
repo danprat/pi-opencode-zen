@@ -76,6 +76,69 @@ const allModels = [
     maxTokens: 128000,
   },
   {
+    id: 'cat-jam-free',
+    name: 'Cat Jam Free',
+    reasoning: true,
+    input: ['text'],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 131072,
+    maxTokens: 32768,
+  },
+  {
+    id: 'ling-3.1-flash-free',
+    name: 'Ling 3.1 Flash Free',
+    reasoning: true,
+    input: ['text'],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 131072,
+    maxTokens: 32768,
+  },
+  {
+    id: 'longcat-2.5-preview-free',
+    name: 'LongCat 2.5 Preview Free',
+    reasoning: true,
+    input: ['text'],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 262144,
+    maxTokens: 65536,
+  },
+  {
+    id: 'mimo-v2.6-flash-free',
+    name: 'MiMo V2.6 Flash Free',
+    reasoning: true,
+    input: ['text'],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 262144,
+    maxTokens: 65536,
+  },
+  {
+    id: 'nemotron-3.5-lightning-free',
+    name: 'Nemotron 3.5 Lightning Free',
+    reasoning: true,
+    input: ['text'],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 262144,
+    maxTokens: 65536,
+  },
+  {
+    id: 'space-bunny-free',
+    name: 'Space Bunny Free',
+    reasoning: true,
+    input: ['text'],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 131072,
+    maxTokens: 32768,
+  },
+  {
+    id: 'step-5-preview-free',
+    name: 'Step 5 Preview Free',
+    reasoning: true,
+    input: ['text'],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 131072,
+    maxTokens: 32768,
+  },
+  {
     id: 'claude-3-5-haiku',
     name: 'Claude 3.5 Haiku',
     reasoning: false,
@@ -486,10 +549,74 @@ const endpoints: Record<string, EndpointConfig> = {
   'kimi-k2-thinking': OPENAI_COMPLETIONS_ENDPOINT,
   // Other models - openai-completions
   'big-pickle': OPENAI_COMPLETIONS_ENDPOINT,
+  'cat-jam-free': OPENAI_COMPLETIONS_ENDPOINT,
+  'ling-3.1-flash-free': OPENAI_COMPLETIONS_ENDPOINT,
+  'longcat-2.5-preview-free': OPENAI_COMPLETIONS_ENDPOINT,
+  'mimo-v2.6-flash-free': OPENAI_COMPLETIONS_ENDPOINT,
+  'nemotron-3.5-lightning-free': OPENAI_COMPLETIONS_ENDPOINT,
+  'space-bunny-free': OPENAI_COMPLETIONS_ENDPOINT,
+  'step-5-preview-free': OPENAI_COMPLETIONS_ENDPOINT,
   'trinity-large-preview-free': OPENAI_COMPLETIONS_ENDPOINT,
   'qwen3.6-plus-free': OPENAI_COMPLETIONS_ENDPOINT,
   'nemotron-3-super-free': OPENAI_COMPLETIONS_ENDPOINT,
 };
+
+const MODEL_MAP: Record<string, string> = {
+  'muse-spark': 'muse-spark-1.3-contributor-free',
+  'muse-spark-1.3': 'muse-spark-1.3-contributor-free',
+  'muse-spark-1.2': 'muse-spark-1.2-contributor-free',
+  mimo: 'mimo-v2.6-flash-free',
+  'mimo-v2.5': 'mimo-v2.6-flash-free',
+  'mimo-v2.5-free': 'mimo-v2.6-flash-free',
+  'mimo-v2.6': 'mimo-v2.6-flash-free',
+  nemotron: 'nemotron-3.5-lightning-free',
+  'nemotron-3': 'nemotron-3.5-lightning-free',
+  'nemotron-3-ultra': 'nemotron-3.5-lightning-free',
+  'nemotron-3-ultra-free': 'nemotron-3.5-lightning-free',
+  'nemotron-3.5': 'nemotron-3.5-lightning-free',
+  ling: 'ling-3.1-flash-free',
+  'ling-3': 'ling-3.1-flash-free',
+  'ling-3.0-flash-fin-free': 'ling-3.1-flash-free',
+  'ling-3.1': 'ling-3.1-flash-free',
+  'space-bunny': 'space-bunny-free',
+  'cat-jam': 'cat-jam-free',
+  longcat: 'longcat-2.5-preview-free',
+  'longcat-2.5': 'longcat-2.5-preview-free',
+};
+
+function normalizeModelId(rawId: string): string {
+  const stripped = rawId.replace(/^(opencode\/|oc\/|zen\/)/i, '');
+  return MODEL_MAP[stripped] ?? stripped;
+}
+
+const REASONING_MODEL_HINTS = [
+  'muse',
+  'mimo',
+  'nemotron',
+  'longcat',
+  'cat-jam',
+  'pickle',
+  'ling',
+  'step-',
+];
+
+function isReasoningModel(modelId: string): boolean {
+  const id = modelId.toLowerCase();
+  return REASONING_MODEL_HINTS.some((hint) => id.includes(hint));
+}
+
+function computeEffectiveMaxTokens(
+  requested: number | undefined,
+  modelId: string,
+  reasoning?: string,
+): number | undefined {
+  if (requested === undefined) return undefined;
+  const raw = Number(requested);
+  const wanted = Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 131072;
+  const isReasoning = isReasoningModel(modelId) || (Boolean(reasoning) && reasoning !== 'off');
+  const effective = isReasoning ? Math.max(wanted, 1024) + 4096 : Math.max(wanted, 512);
+  return Math.min(effective, 131072);
+}
 
 function createModelConfig(
   id: string,
@@ -499,6 +626,7 @@ function createModelConfig(
   cost: { input: number; output: number; cacheRead: number; cacheWrite: number },
   contextWindow: number,
   maxTokens: number,
+  thinkingLevelMap?: Model<Api>['thinkingLevelMap'],
 ): ProviderModelConfig {
   return {
     id,
@@ -508,6 +636,7 @@ function createModelConfig(
     cost,
     contextWindow,
     maxTokens,
+    ...(thinkingLevelMap ? { thinkingLevelMap } : {}),
   };
 }
 
@@ -522,6 +651,7 @@ const STATIC_MODELS: ProviderModelConfig[] = allModels.map((m) =>
     { ...m.cost },
     m.contextWindow,
     m.maxTokens,
+    m.id.includes('muse') ? { off: null } : undefined,
   ),
 );
 
@@ -557,13 +687,24 @@ async function fetchVisibleModelIds(
 ): Promise<Set<string> | undefined> {
   try {
     const init: RequestInit = {
-      headers: { Authorization: `Bearer ${apiKey}`, ...opencodeHeaders() },
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'User-Agent': USER_AGENT,
+        Accept: 'application/json',
+      },
     };
     if (signal) init.signal = signal;
     const response = await fetch(`${BASE_URL}/models`, init);
     if (!response.ok) return undefined;
     const json = (await response.json()) as { data?: Array<{ id?: string }> };
-    return new Set((json.data ?? []).map((m) => m.id).filter((id): id is string => Boolean(id)));
+    return new Set(
+      (json.data ?? [])
+        .map((m) => m.id)
+        .filter(
+          (id): id is string =>
+            typeof id === 'string' && id.length > 0 && !id.toLowerCase().startsWith('jev-'),
+        ),
+    );
   } catch {
     return undefined;
   }
@@ -590,8 +731,12 @@ function isPublicMode(apiKey?: string): boolean {
   return !apiKey || apiKey === 'public';
 }
 
-function isFreeModel(id: string, model: ModelsDevModelInfo | undefined): boolean {
-  if (id.endsWith('-free') || id === 'big-pickle') return true;
+function isFreeModel(id: string, model?: ModelsDevModelInfo): boolean {
+  const lower = id.toLowerCase();
+  if (lower.startsWith('jev-')) return false;
+  if (lower.endsWith('-free') || lower.includes('-contributor') || lower === 'big-pickle') {
+    return true;
+  }
   const cost = model?.cost;
   if (!cost) return false;
   return (cost.input ?? 0) === 0;
@@ -618,12 +763,15 @@ function getVisibleModels(
         { ...model.cost },
         model.contextWindow,
         model.maxTokens,
+        model.id.includes('muse') ? { off: null } : undefined,
       ),
     );
   }
 
   if (visibleIds) {
     for (const id of visibleIds) {
+      if (id.toLowerCase().startsWith('jev-')) continue;
+      const isMuse = id.toLowerCase().includes('muse');
       const dev = modelsDevInfo?.[id];
       if (dev && dev.status !== 'deprecated') {
         const input = (dev.modalities?.input ?? ['text']).filter(
@@ -634,7 +782,7 @@ function getVisibleModels(
           createModelConfig(
             id,
             dev.name || id,
-            Boolean(dev.reasoning),
+            dev.reasoning ?? isReasoningModel(id),
             input.length > 0 ? input : ['text'],
             {
               input: dev.cost?.input ?? 0,
@@ -642,8 +790,9 @@ function getVisibleModels(
               cacheRead: dev.cost?.cache_read ?? 0,
               cacheWrite: dev.cost?.cache_write ?? 0,
             },
-            dev.limit?.context ?? 200000,
-            dev.limit?.output ?? 64000,
+            dev.limit?.context ?? (isMuse ? 128000 : 200000),
+            dev.limit?.output ?? (isMuse ? 32000 : 64000),
+            isMuse ? { off: null } : undefined,
           ),
         );
       } else if (!modelMap.has(id)) {
@@ -652,11 +801,12 @@ function getVisibleModels(
           createModelConfig(
             id,
             id,
-            true,
+            isReasoningModel(id),
             ['text'],
             { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-            200000,
-            64000,
+            isMuse ? 128000 : 200000,
+            isMuse ? 32000 : 64000,
+            isMuse ? { off: null } : undefined,
           ),
         );
       }
@@ -680,30 +830,57 @@ function getVisibleModels(
   return models;
 }
 
-const BASE62 = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
-const HEX_DIGITS = '0123456789abcdef';
+const USER_AGENT = 'opencode/1.18.31 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14';
+const CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+let lastTimestamp = 0;
+let counter = 0;
 
-function canonicalId(prefix: 'ses_' | 'msg_'): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(20));
-  let result = prefix;
+function createOpencodeId(descending: boolean, timestamp = Date.now()): string {
+  if (timestamp !== lastTimestamp) {
+    lastTimestamp = timestamp;
+    counter = 0;
+  }
+  counter++;
+  const current = BigInt(timestamp) * 0x1000n + BigInt(counter);
+  const value = descending ? ~current : current;
+  let time = '';
   for (let i = 0; i < 6; i++) {
-    const b = bytes[i] ?? 0;
-    result += (HEX_DIGITS[(b >> 4) & 0x0f] ?? '0') + (HEX_DIGITS[b & 0x0f] ?? '0');
+    const byte = Number((value >> BigInt(40 - 8 * i)) & 0xffn);
+    time += byte.toString(16).padStart(2, '0');
   }
-  for (let i = 6; i < 20; i++) {
-    result += BASE62[(bytes[i] ?? 0) % 62] ?? '0';
+  const randomBytes = crypto.getRandomValues(new Uint8Array(14));
+  let randomStr = '';
+  for (let i = 0; i < 14; i++) {
+    randomStr += CHARS[(randomBytes[i] ?? 0) % 62] ?? '0';
   }
-  return result;
+  return time + randomStr;
 }
 
-const SESSION_ID = canonicalId('ses_');
+const activeSessionId = 'ses_' + createOpencodeId(true);
+const sessionMap = new Map<string, string>();
 
-function opencodeHeaders(): Record<string, string> {
+function getSessionId(callerSessionId?: string): string {
+  if (!callerSessionId) {
+    return activeSessionId;
+  }
+  let existing = sessionMap.get(callerSessionId);
+  if (!existing) {
+    if (sessionMap.size >= 500) {
+      const firstKey = sessionMap.keys().next().value;
+      if (firstKey) sessionMap.delete(firstKey);
+    }
+    existing = 'ses_' + createOpencodeId(true);
+    sessionMap.set(callerSessionId, existing);
+  }
+  return existing;
+}
+
+function opencodeHeaders(sessionId?: string): Record<string, string> {
   return {
-    'User-Agent': 'opencode/1.18.31',
-    'x-opencode-client': 'cli',
-    'x-opencode-session': SESSION_ID,
-    'x-opencode-request': canonicalId('msg_'),
+    'User-Agent': USER_AGENT,
+    'x-opencode-client': 'desktop',
+    'x-opencode-session': getSessionId(sessionId),
+    'x-opencode-request': 'msg_' + createOpencodeId(false),
     'x-opencode-project': 'global',
     Accept: 'text/event-stream',
   };
@@ -711,14 +888,42 @@ function opencodeHeaders(): Record<string, string> {
 
 const GATE_TOOLS: readonly Tool[] = Object.freeze([
   {
+    name: 'read',
+    description: 'Read file',
+    parameters: Type.Object({ path: Type.String() }),
+  },
+  {
+    name: 'write',
+    description: 'Write file',
+    parameters: Type.Object({ path: Type.String(), content: Type.String() }),
+  },
+  {
+    name: 'edit',
+    description: 'Edit file',
+    parameters: Type.Object({
+      path: Type.String(),
+      edits: Type.Array(
+        Type.Object({
+          oldText: Type.String(),
+          newText: Type.String(),
+        }),
+      ),
+    }),
+  },
+  {
     name: 'bash',
     description: 'Execute bash command',
     parameters: Type.Object({ command: Type.String() }),
   },
   {
-    name: 'read',
-    description: 'Read file',
-    parameters: Type.Object({ path: Type.String() }),
+    name: 'glob',
+    description: 'Find files matching pattern',
+    parameters: Type.Object({ pattern: Type.String() }),
+  },
+  {
+    name: 'grep',
+    description: 'Search files for pattern',
+    parameters: Type.Object({ pattern: Type.String() }),
   },
 ]);
 
@@ -750,11 +955,16 @@ function ensureOpencodeGateTools(context: TranscriptContext): TranscriptContext 
 }
 
 function getEndpointConfig(modelId: string): EndpointConfig {
-  const direct = endpoints[modelId];
+  const normalized = normalizeModelId(modelId);
+  const direct = endpoints[normalized];
   if (direct) return direct;
-  if (modelId.startsWith('claude-')) return ANTHROPIC_MESSAGES_ENDPOINT;
-  if (modelId.startsWith('gemini-')) return GOOGLE_GENERATIVE_AI_ENDPOINT;
-  if (modelId.startsWith('gpt-') || modelId.startsWith('muse-')) {
+  if (normalized.startsWith('claude-')) return ANTHROPIC_MESSAGES_ENDPOINT;
+  if (normalized.startsWith('gemini-')) return GOOGLE_GENERATIVE_AI_ENDPOINT;
+  if (
+    normalized.startsWith('gpt-') ||
+    normalized.startsWith('muse-') ||
+    normalized.includes('muse')
+  ) {
     return OPENAI_RESPONSES_ENDPOINT;
   }
   return OPENAI_COMPLETIONS_ENDPOINT;
@@ -769,20 +979,30 @@ export function streamOpencodeZen(
     return openAICompletionsApi().streamSimple(model, context, options);
   }
 
-  const endpoint = getEndpointConfig(model.id);
+  const normalizedId = normalizeModelId(model.id);
+  const endpoint = getEndpointConfig(normalizedId);
+  const isResponses = endpoint.api === 'openai-responses';
 
   const wrappedModel = {
     ...model,
+    id: normalizedId,
     api: endpoint.api,
     baseUrl: endpoint.baseUrl,
+    ...(isResponses ? { thinkingLevelMap: { off: null } } : {}),
   } as Model<Api>;
 
   const resolvedApiKey = options?.apiKey || getEffectiveApiKey();
+  const effectiveMaxTokens = computeEffectiveMaxTokens(
+    options?.maxTokens,
+    normalizedId,
+    options?.reasoning,
+  );
 
   const wrappedOptions: SimpleStreamOptions = {
     ...options,
     apiKey: resolvedApiKey,
-    headers: { ...options?.headers, ...opencodeHeaders() },
+    headers: { ...options?.headers, ...opencodeHeaders(options?.sessionId) },
+    ...(effectiveMaxTokens !== undefined ? { maxTokens: effectiveMaxTokens } : {}),
   };
 
   const gateContext = ensureOpencodeGateTools(context);
@@ -842,7 +1062,7 @@ async function loadDynamicModels(
   apiKey?: string,
   signal?: AbortSignal,
 ): Promise<ProviderModelConfig[]> {
-  const abortSignal = signal ?? AbortSignal.timeout(3000);
+  const abortSignal = signal ?? AbortSignal.timeout(5000);
   try {
     const [visibleIds, modelsDevInfo] = await Promise.all([
       apiKey ? fetchVisibleModelIds(apiKey, abortSignal) : Promise.resolve(undefined),
@@ -863,18 +1083,21 @@ async function loadDynamicModels(
     return cached;
   }
 
-  return STATIC_MODELS;
+  return isPublicMode(apiKey) ? STATIC_MODELS.filter((m) => isFreeModel(m.id)) : STATIC_MODELS;
 }
 
 export async function refreshModels(context: RefreshModelsContext): Promise<ProviderModelConfig[]> {
-  if (!context.allowNetwork || context.signal.aborted) {
-    const cached = loadCachedModels();
-    return cached && cached.length > 0 ? cached : STATIC_MODELS;
-  }
-
   const apiKey = getEffectiveApiKey(
     context.credential?.type === 'api_key' ? context.credential.key : undefined,
   );
+  if (!context.allowNetwork || context.signal.aborted) {
+    const cached = loadCachedModels();
+    return cached && cached.length > 0
+      ? cached
+      : isPublicMode(apiKey)
+        ? STATIC_MODELS.filter((m) => isFreeModel(m.id))
+        : STATIC_MODELS;
+  }
 
   return loadDynamicModels(apiKey, context.signal);
 }

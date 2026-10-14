@@ -53,15 +53,13 @@ New users can start using OpenCode Zen immediately without configuring an API ke
 ### Features
 
 - **Automatic `public` mode fallback**: zero setup required for new users to use free-tier models immediately.
-- **Dynamic model discovery**: checks the live OpenCode Zen API and `models.dev` dynamically on launch, ensuring newly added models are discovered and deprecated models are removed.
+- **Desktop client identity**: generates authentic timestamp-encoded session (`ses_...`) and request (`msg_...`) headers matching the OpenCode desktop application format to prevent `403 FreeTierError`.
+- **Reasoning-aware token budgeting**: applies an additive token budget (`max(requested, 1024) + 4096`) for reasoning models, ensuring chain-of-thought tokens do not consume the visible answer headroom on short requests.
+- **Dynamic model discovery**: checks the live OpenCode Zen API and `models.dev` dynamically on launch, ensuring newly added free models (e.g., `mimo-v2.6-flash-free`, `nemotron-3.5-lightning-free`, `cat-jam-free`, `muse-spark-1.3-contributor-free`, `big-pickle`, etc.) are discovered automatically.
+- **Model alias normalisation**: supports common shorthand aliases (`mimo`, `nemotron-3.5`, `muse-spark-1.3`, `cat-jam`, `longcat`, etc.).
 - **Resilient offline cache**: persists discovered models to `~/.pi/agent/cache/opencode-zen-models.json` with a bounded timeout, ensuring Pi-Bolt starts reliably even when offline.
 - **Pi-Bolt AOT optimisations**: monomorphic object shapes, module-level constant hoisting, and streamlined ID generation for maximum runtime performance.
-- **Request headers**: adds OpenCode request headers on every `opencode-zen` request:
-  - `x-opencode-client`
-  - `x-opencode-session`
-  - `x-opencode-project`
-  - `x-opencode-request`
-- **Gate tools**: attaches required core tools (`bash`, `read`) to satisfy the OpenCode validation gate.
+- **Gate tools**: automatically provides the required desktop compatibility tools (`read`, `write`, `edit`, `bash`, `glob`, `grep`) to satisfy the OpenCode anti-abuse validation check.
 
 ### Model Filtering and Protocol Routing
 
