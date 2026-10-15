@@ -125,17 +125,18 @@ This extension includes a built-in serverless edge proxy relay inspired by [9rou
 
 - **Seamless automatic fallback**: if your Vercel relay times out, crashes, or returns HTTP 502/503/504 errors, requests automatically fall back to direct connection instantly without failing or interrupting the current conversation.
 - **Circuit breaker cooldown**: after 2 consecutive relay failures, the proxy trips into a 60-second cooldown period, preventing latency delays on subsequent requests.
-- **Statusline indicator**: persistent real-time status in the footer status bar:
+- **Provider-scoped isolation**: the proxy and its statusline indicator are strictly scoped to the `opencode-zen` provider. Other providers, tools, and extensions continue using unproxied direct connections, and the statusline indicator automatically hides whenever a non-OpenCode model is selected.
+- **Statusline indicator**: real-time status in the footer status bar (visible only when using an `opencode-zen` model):
   - `⚡ Proxy: ON` (Relay active and healthy)
   - `⚠️ Proxy: Direct (Fallback)` (Temporarily falling back to direct connection)
   - `🌐 Proxy: OFF` (Proxy disabled)
   - `⚠️ Proxy: No URL` (Enabled without a configured relay URL)
 - **Strict proxy mode (`strictProxy`)**: for users in restricted regions who must prevent leaking their real IP, strict mode can be toggled on to forbid direct fallback.
-- **One-click Vercel deployment**: deploy an Edge relay function to your own Vercel account directly from Pi using `/zen-proxy deploy <vercel-token>`.
+- **One-click Vercel deployment**: deploy an Edge relay function to your own Vercel account directly from Pi using `/zen deploy <vercel-token>`.
 
 ### Interactive Commands & Menu
 
-Simply type `/zen` (or `/zen-proxy`) in interactive mode to open the user-friendly management menu, which shows your current relay state, configuration, and one-click actions:
+Simply type `/zen` in interactive mode to open the user-friendly management menu, which shows your current relay state, configuration, and one-click actions:
 
 | Command                   | Description                                                           |
 | ------------------------- | --------------------------------------------------------------------- |
@@ -148,8 +149,6 @@ Simply type `/zen` (or `/zen-proxy`) in interactive mode to open the user-friend
 | `/zen fallback [on\|off]` | Enable or disable seamless fallback to direct connection              |
 | `/zen strict [on\|off]`   | Toggle strict mode (disallow direct fallback)                         |
 | `/zen deploy [token]`     | Automatically deploy a private edge relay to Vercel                   |
-
-_(Note: `/zen-proxy` is available as a full alias for `/zen`)_
 
 ### Environment Variables & Persistence
 

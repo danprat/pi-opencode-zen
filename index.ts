@@ -23,14 +23,14 @@ import { join } from 'node:path';
 import {
   type ProxyStateSnapshot,
   deployVercelRelay,
+  getProxyConfig,
   getProxyStateSnapshot,
-  installProxyFetchInterceptor,
   originalFetch,
+  proxyAwareFetch,
   renderProxyStatusline,
   setProxyConfig,
   subscribeProxyStatus,
   toggleProxy,
-  uninstallProxyFetchInterceptor,
 } from './proxy.ts';
 
 export * from './proxy.ts';
@@ -722,7 +722,7 @@ async function fetchVisibleModelIds(
         },
       };
       if (signal) init.signal = signal;
-      const response = await fetch(url, init);
+      const response = await proxyAwareFetch(url, init);
       if (!response.ok) continue;
       const json = (await response.json()) as { data?: Array<{ id?: string }> };
       return new Set(
@@ -1094,6 +1094,9 @@ export function streamOpencodeZen(
     }
   }
 
+  const proxyConfig = getProxyConfig();
+  const isProxyActive = proxyConfig.enabled && Boolean(proxyConfig.relayUrl);
+
   const wrappedModel = {
     ...model,
     id: normalizedId,
@@ -1106,6 +1109,7 @@ export function streamOpencodeZen(
     ...options,
     apiKey: resolvedApiKey,
     headers: { ...options?.headers, ...opencodeHeaders(options?.sessionId, isFree) },
+    fetch: proxyAwareFetch,
     ...(effectiveMaxTokens !== undefined ? { maxTokens: effectiveMaxTokens } : {}),
   };
 
@@ -1114,8 +1118,23 @@ export function streamOpencodeZen(
   switch (endpoint.api) {
     case 'anthropic-messages':
       return anthropicMessagesApi().streamSimple(wrappedModel, gateContext, wrappedOptions);
-    case 'google-generative-ai':
-      return googleGenerativeAIApi().streamSimple(wrappedModel, gateContext, wrappedOptions);
+    case 'google-generative-ai': {
+      // Google GenAI adapter disallows custom options.fetch; route via baseUrl if proxy is active
+      const googleModel = isProxyActive
+        ? ({ ...wrappedModel, baseUrl: proxyConfig.relayUrl } as Model<Api>)
+        : wrappedModel;
+      const googleHeaders = isProxyActive
+        ? { ...wrappedOptions.headers, 'x-relay-target': 'https://opencode.ai' }
+        : wrappedOptions.headers;
+      const googleOptions: SimpleStreamOptions = {
+        ...wrappedOptions,
+      };
+      delete (googleOptions as { fetch?: unknown }).fetch;
+      if (googleHeaders !== undefined) {
+        googleOptions.headers = googleHeaders;
+      }
+      return googleGenerativeAIApi().streamSimple(googleModel, gateContext, googleOptions);
+    }
     case 'openai-responses':
       return openAIResponsesApi().streamSimple(wrappedModel, gateContext, wrappedOptions);
     case 'openai-completions':
@@ -1209,35 +1228,51 @@ export async function refreshModels(context: RefreshModelsContext): Promise<Prov
 export const PROXY_STATUS_KEY = 'opencode-zen-proxy';
 
 let activeUi: ExtensionUIContext | undefined;
+let currentProvider: string | undefined;
 
 export function updateProxyStatusline(
   ui?: ExtensionUIContext,
   snapshot: ProxyStateSnapshot = getProxyStateSnapshot(),
+  provider = currentProvider,
 ): void {
   const targetUi = ui ?? activeUi;
   if (!targetUi) return;
+
+  // Only display the proxy indicator when using an opencode-zen model
+  if (provider !== 'opencode-zen') {
+    targetUi.setStatus(PROXY_STATUS_KEY, undefined);
+    return;
+  }
+
   targetUi.setStatus(PROXY_STATUS_KEY, renderProxyStatusline(targetUi.theme, snapshot));
 }
 
 subscribeProxyStatus((snapshot) => {
   if (activeUi) {
-    updateProxyStatusline(activeUi, snapshot);
+    updateProxyStatusline(activeUi, snapshot, currentProvider);
   }
 });
 
 export async function opencodeZen(pi: ExtensionAPI): Promise<void> {
-  installProxyFetchInterceptor();
-
   pi.on('session_start', async (_event, ctx) => {
     if (ctx.hasUI && ctx.ui) {
       activeUi = ctx.ui;
-      updateProxyStatusline(ctx.ui);
+      currentProvider = ctx.model?.provider;
+      updateProxyStatusline(ctx.ui, getProxyStateSnapshot(), currentProvider);
+    }
+  });
+
+  pi.on('model_select', async (event, ctx) => {
+    currentProvider = event.model?.provider;
+    if (ctx.hasUI && ctx.ui) {
+      activeUi = ctx.ui;
+      updateProxyStatusline(ctx.ui, getProxyStateSnapshot(), currentProvider);
     }
   });
 
   pi.on('session_shutdown', async () => {
     activeUi = undefined;
-    uninstallProxyFetchInterceptor();
+    currentProvider = undefined;
   });
 
   const runInteractiveZenMenu = async (ctx: ExtensionCommandContext): Promise<void> => {
@@ -1576,14 +1611,6 @@ export async function opencodeZen(pi: ExtensionAPI): Promise<void> {
 
   pi.registerCommand('zen', {
     description: 'OpenCode Zen Proxy Manager interactive menu and controls',
-    getArgumentCompletions: getZenCommandCompletions,
-    handler: async (args, ctx) => {
-      await handleZenProxyCommand(args, ctx);
-    },
-  });
-
-  pi.registerCommand('zen-proxy', {
-    description: 'Manage OpenCode Zen Vercel proxy (alias for /zen)',
     getArgumentCompletions: getZenCommandCompletions,
     handler: async (args, ctx) => {
       await handleZenProxyCommand(args, ctx);

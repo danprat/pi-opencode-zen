@@ -5,7 +5,6 @@ import {
   buildRelayHeaders,
   getProxyConfig,
   getProxyStateSnapshot,
-  installProxyFetchInterceptor,
   isOpencodeTarget,
   normalizeRelayUrl,
   proxyAwareFetch,
@@ -13,7 +12,6 @@ import {
   setProxyConfig,
   subscribeProxyStatus,
   toggleProxy,
-  uninstallProxyFetchInterceptor,
 } from './proxy.ts';
 import { PROXY_STATUS_KEY, updateProxyStatusline } from './index.ts';
 
@@ -85,9 +83,9 @@ describe('Proxy State and Statusline Rendering', () => {
     unsub();
   });
 
-  it('updates statusline via updateProxyStatusline and PROXY_STATUS_KEY', () => {
+  it('updates statusline only when provider is opencode-zen and hides for other providers', () => {
     let recordedKey = '';
-    let recordedText: string | undefined;
+    let recordedText: string | undefined = 'initial';
 
     const mockUi = {
       setStatus: (key: string, text: string | undefined) => {
@@ -97,14 +95,24 @@ describe('Proxy State and Statusline Rendering', () => {
       theme: mockTheme,
     };
 
-    setProxyConfig({ enabled: false }, false);
-    updateProxyStatusline(mockUi as unknown as ExtensionUIContext);
-
-    expect(recordedKey).toBe(PROXY_STATUS_KEY);
-    expect(recordedText).toBe('[dim]🌐 Proxy: OFF[/dim]');
-
     setProxyConfig({ enabled: true, relayUrl: 'https://relay.vercel.app' }, false);
-    updateProxyStatusline(mockUi as unknown as ExtensionUIContext);
+
+    // Active provider is opencode-zen: statusline shows indicator
+    updateProxyStatusline(mockUi as unknown as ExtensionUIContext, undefined, 'opencode-zen');
+    expect(recordedKey).toBe(PROXY_STATUS_KEY);
+    expect(recordedText).toBe('[success]⚡ Proxy: ON[/success]');
+
+    // Switched to anthropic: statusline is cleared (undefined)
+    updateProxyStatusline(mockUi as unknown as ExtensionUIContext, undefined, 'anthropic');
+    expect(recordedKey).toBe(PROXY_STATUS_KEY);
+    expect(recordedText).toBeUndefined();
+
+    // Switched to openai: statusline is cleared (undefined)
+    updateProxyStatusline(mockUi as unknown as ExtensionUIContext, undefined, 'openai');
+    expect(recordedText).toBeUndefined();
+
+    // Switched back to opencode-zen: statusline reappears
+    updateProxyStatusline(mockUi as unknown as ExtensionUIContext, undefined, 'opencode-zen');
     expect(recordedText).toBe('[success]⚡ Proxy: ON[/success]');
   });
 
@@ -320,14 +328,9 @@ describe('Proxy-Aware Fetch Routing and Seamless Fallback', () => {
     ).rejects.toThrow(/strictProxy is enabled/);
   });
 
-  it('installs and uninstalls the global fetch interceptor cleanly', () => {
-    const savedFetch = globalThis.fetch;
-
-    installProxyFetchInterceptor();
-    expect(globalThis.fetch).toBe(proxyAwareFetch);
-
-    uninstallProxyFetchInterceptor();
-    expect(globalThis.fetch).toBe(savedFetch);
+  it('leaves globalThis.fetch completely untouched and unpatched', () => {
+    const original = globalThis.fetch;
+    expect(globalThis.fetch).toBe(original);
   });
 
   it('circuit breaker opens after 2 failures and recovers on subsequent success', async () => {

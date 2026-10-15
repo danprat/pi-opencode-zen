@@ -349,26 +349,14 @@ export function renderProxyStatusline(
   return theme.fg('success', '⚡ Proxy: ON');
 }
 
-export let originalFetch: typeof globalThis.fetch = globalThis.fetch;
-let activeFetchImpl: typeof globalThis.fetch = globalThis.fetch;
-
-export function getUnderlyingFetch(): typeof globalThis.fetch {
-  if (globalThis.fetch !== proxyAwareFetch) {
-    return globalThis.fetch;
-  }
-  return activeFetchImpl;
-}
-
-export function setUnderlyingFetch(fn: typeof globalThis.fetch): void {
-  activeFetchImpl = fn;
-}
+export const originalFetch: typeof globalThis.fetch = globalThis.fetch;
 
 export async function proxyAwareFetch(
   input: RequestInfo | URL,
   init?: RequestInit,
   customFetch?: typeof globalThis.fetch,
 ): Promise<Response> {
-  const dispatchFetch = customFetch ?? getUnderlyingFetch();
+  const dispatchFetch = customFetch ?? globalThis.fetch;
   const targetUrl =
     typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
 
@@ -472,27 +460,6 @@ export async function proxyAwareFetch(
     // Fallback seamlessly to direct connection
     return dispatchFetch(input, init);
   }
-}
-
-// Global fetch interceptor installation
-let isInterceptorInstalled = false;
-
-export function installProxyFetchInterceptor(): void {
-  if (isInterceptorInstalled) return;
-  if (globalThis.fetch !== proxyAwareFetch) {
-    activeFetchImpl = globalThis.fetch;
-    originalFetch = globalThis.fetch;
-    globalThis.fetch = proxyAwareFetch;
-  }
-  isInterceptorInstalled = true;
-}
-
-export function uninstallProxyFetchInterceptor(): void {
-  if (!isInterceptorInstalled) return;
-  if (globalThis.fetch === proxyAwareFetch) {
-    globalThis.fetch = activeFetchImpl;
-  }
-  isInterceptorInstalled = false;
 }
 
 // ─── Automated Vercel Deployment ──────────────────────────────────────────
