@@ -1240,21 +1240,188 @@ export async function opencodeZen(pi: ExtensionAPI): Promise<void> {
     uninstallProxyFetchInterceptor();
   });
 
+  const runInteractiveZenMenu = async (ctx: ExtensionCommandContext): Promise<void> => {
+    while (true) {
+      const snapshot = getProxyStateSnapshot();
+      updateProxyStatusline(ctx.ui, snapshot);
+
+      const statusBadge = !snapshot.enabled
+        ? '🔴 Disabled'
+        : !snapshot.relayUrl
+          ? '⚠️ Enabled (Missing URL)'
+          : snapshot.isFallbackActive
+            ? '⚠️ Active (Direct Fallback)'
+            : '🟢 Active (Relaying via Vercel)';
+
+      const shortUrl = snapshot.relayUrl
+        ? snapshot.relayUrl.replace(/^https?:\/\//, '')
+        : 'Not configured';
+
+      const menuTitle = `OpenCode Zen Proxy Manager\nStatus: ${statusBadge}\nRelay: ${shortUrl}`;
+
+      const toggleAction = snapshot.enabled
+        ? '🔴 Turn Proxy OFF (Switch to direct connection)'
+        : '🟢 Turn Proxy ON (Route traffic through Vercel relay)';
+
+      const urlAction = snapshot.relayUrl
+        ? `🔗 Change Relay URL (Current: ${shortUrl})`
+        : '🔗 Set Relay URL (Enter an existing Vercel relay URL)';
+
+      const deployAction = snapshot.relayUrl
+        ? '🚀 Deploy New Relay to Vercel (Replaces current relay using Vercel token)'
+        : '🚀 Deploy New Relay to Vercel (Recommended: auto-creates relay in 10s)';
+
+      const fallbackAction =
+        snapshot.fallback && !snapshot.strictProxy
+          ? '🛡️ Auto Direct Fallback: ON (Safe: switches to direct if relay fails)'
+          : '🛡️ Auto Direct Fallback: OFF (Strict: never leaks direct IP)';
+
+      const testAction = '🩺 Test Relay Connection & Latency';
+      const exitAction = '❌ Close Menu';
+
+      const choice = await ctx.ui.select(menuTitle, [
+        toggleAction,
+        urlAction,
+        deployAction,
+        fallbackAction,
+        testAction,
+        exitAction,
+      ]);
+
+      if (!choice || choice === exitAction) {
+        break;
+      }
+
+      if (choice === toggleAction) {
+        const next = toggleProxy();
+        updateProxyStatusline(ctx.ui, next);
+        ctx.ui.notify(
+          next.enabled
+            ? `Vercel proxy enabled${next.relayUrl ? ` (${next.relayUrl})` : ' (no URL set)'}`
+            : 'Vercel proxy disabled (direct connection active)',
+          'info',
+        );
+      } else if (choice === urlAction) {
+        const input = await ctx.ui.input(
+          'Vercel Relay URL',
+          snapshot.relayUrl || 'https://your-relay.vercel.app',
+        );
+        if (input && input.trim()) {
+          let url = input.trim();
+          if (!url.startsWith('http://') && !url.startsWith('https://')) {
+            url = `https://${url}`;
+          }
+          const next = setProxyConfig({ relayUrl: url, enabled: true });
+          updateProxyStatusline(ctx.ui, next);
+          ctx.ui.notify(`Relay URL updated: ${next.relayUrl}`, 'info');
+        }
+      } else if (choice === deployAction) {
+        const confirmed = await ctx.ui.confirm(
+          'Deploy Vercel Edge Relay',
+          'Deploy a private edge relay to your personal Vercel account.\n\nRequires a Vercel Personal Access Token from:\nhttps://vercel.com/account/tokens\n\nWould you like to deploy now?',
+        );
+        if (confirmed) {
+          const token = await ctx.ui.input(
+            'Vercel API Token',
+            'Paste your Vercel personal access token (vcp_...)',
+          );
+          if (token && token.trim()) {
+            ctx.ui.notify('Deploying relay function to Vercel...', 'info');
+            try {
+              const res = await deployVercelRelay({
+                vercelToken: token.trim(),
+                onProgress: (msg) => ctx.ui.notify(msg, 'info'),
+              });
+              updateProxyStatusline(ctx.ui);
+              ctx.ui.notify(`✓ Relay deployed successfully! URL: ${res.deployUrl}`, 'info');
+            } catch (error) {
+              const msg = error instanceof Error ? error.message : String(error);
+              ctx.ui.notify(`Vercel deployment failed: ${msg}`, 'error');
+            }
+          } else {
+            ctx.ui.notify('Deployment cancelled: token not provided', 'warning');
+          }
+        }
+      } else if (choice === fallbackAction) {
+        const nextFallback = !snapshot.fallback || snapshot.strictProxy;
+        const next = setProxyConfig({
+          fallback: nextFallback,
+          strictProxy: !nextFallback,
+        });
+        updateProxyStatusline(ctx.ui, next);
+        ctx.ui.notify(
+          next.fallback
+            ? 'Safe fallback enabled: automatically switches to direct connection if relay fails'
+            : 'Strict proxy mode enabled: direct fallback is disabled',
+          next.fallback ? 'info' : 'warning',
+        );
+      } else if (choice === testAction) {
+        if (!snapshot.relayUrl) {
+          ctx.ui.notify('Cannot test connection: No relay URL configured.', 'warning');
+        } else {
+          ctx.ui.notify(`Testing connectivity to ${shortUrl}...`, 'info');
+          const start = Date.now();
+          try {
+            const probe = await originalFetch(snapshot.relayUrl, {
+              headers: {
+                'x-relay-target': 'https://opencode.ai',
+                'x-relay-path': '/inference/v1/models',
+                Authorization: 'Bearer public',
+              },
+              signal: AbortSignal.timeout(8000),
+            });
+            const latency = Date.now() - start;
+            if (probe.ok) {
+              ctx.ui.notify(
+                `✓ Relay is healthy! Latency: ${latency}ms (HTTP ${probe.status})`,
+                'info',
+              );
+            } else {
+              ctx.ui.notify(
+                `⚠ Relay responded with HTTP ${probe.status} (${latency}ms)`,
+                'warning',
+              );
+            }
+          } catch (err) {
+            const latency = Date.now() - start;
+            const msg = err instanceof Error ? err.message : String(err);
+            ctx.ui.notify(`❌ Relay unreachable (${latency}ms): ${msg}`, 'error');
+          }
+        }
+      }
+    }
+  };
+
   const handleZenProxyCommand = async (
     args: string,
     ctx: ExtensionCommandContext,
   ): Promise<void> => {
     activeUi = ctx.ui;
     const parts = args.trim().split(/\s+/).filter(Boolean);
+
+    // If no argument provided in interactive mode, open the interactive UI menu
+    if (parts.length === 0 && ctx.hasUI && ctx.mode === 'tui') {
+      await runInteractiveZenMenu(ctx);
+      return;
+    }
+
     const subcommand = parts[0]?.toLowerCase() || 'status';
 
     switch (subcommand) {
+      case 'menu': {
+        if (ctx.hasUI && ctx.mode === 'tui') {
+          await runInteractiveZenMenu(ctx);
+        } else {
+          ctx.ui.notify('Interactive menu is only available in TUI mode', 'warning');
+        }
+        break;
+      }
       case 'on': {
         const snapshot = setProxyConfig({ enabled: true });
         updateProxyStatusline(ctx.ui, snapshot);
         if (!snapshot.relayUrl) {
           ctx.ui.notify(
-            'Vercel proxy enabled, but no relay URL is set. Use `/zen-proxy set <url>` or `/zen-proxy deploy <token>`.',
+            'Vercel proxy enabled, but no relay URL is set. Use `/zen set <url>` or `/zen deploy`.',
             'warning',
           );
         } else {
@@ -1265,7 +1432,7 @@ export async function opencodeZen(pi: ExtensionAPI): Promise<void> {
       case 'off': {
         const snapshot = setProxyConfig({ enabled: false });
         updateProxyStatusline(ctx.ui, snapshot);
-        ctx.ui.notify('Vercel proxy disabled', 'info');
+        ctx.ui.notify('Vercel proxy disabled (direct connection)', 'info');
         break;
       }
       case 'toggle': {
@@ -1320,10 +1487,18 @@ export async function opencodeZen(pi: ExtensionAPI): Promise<void> {
       case 'deploy': {
         let token = parts.slice(1).join(' ').trim();
         if (!token) {
+          const confirmed = await ctx.ui.confirm(
+            'Deploy Vercel Edge Relay',
+            'Deploy a private edge relay to your personal Vercel account.\n\nRequires a Vercel Personal Access Token from:\nhttps://vercel.com/account/tokens\n\nProceed?',
+          );
+          if (!confirmed) {
+            ctx.ui.notify('Deployment cancelled', 'info');
+            return;
+          }
           token =
             (await ctx.ui.input(
               'Deploy Vercel Relay',
-              'Enter your Vercel Personal Access Token',
+              'Enter your Vercel Personal Access Token (vcp_...)',
             )) || '';
         }
         if (!token) {
@@ -1383,14 +1558,33 @@ export async function opencodeZen(pi: ExtensionAPI): Promise<void> {
     }
   };
 
-  pi.registerCommand('zen-proxy', {
-    description:
-      'Manage OpenCode Zen Vercel proxy (on, off, toggle, set, status, deploy, fallback)',
-    getArgumentCompletions: (prefix) => {
-      const subcommands = ['on', 'off', 'toggle', 'status', 'set', 'fallback', 'strict', 'deploy'];
-      const filtered = subcommands.filter((cmd) => cmd.startsWith(prefix.trim().toLowerCase()));
-      return filtered.length > 0 ? filtered.map((cmd) => ({ value: cmd, label: cmd })) : null;
+  const getZenCommandCompletions = (prefix: string) => {
+    const subcommands = [
+      'menu',
+      'on',
+      'off',
+      'toggle',
+      'status',
+      'set',
+      'fallback',
+      'strict',
+      'deploy',
+    ];
+    const filtered = subcommands.filter((cmd) => cmd.startsWith(prefix.trim().toLowerCase()));
+    return filtered.length > 0 ? filtered.map((cmd) => ({ value: cmd, label: cmd })) : null;
+  };
+
+  pi.registerCommand('zen', {
+    description: 'OpenCode Zen Proxy Manager interactive menu and controls',
+    getArgumentCompletions: getZenCommandCompletions,
+    handler: async (args, ctx) => {
+      await handleZenProxyCommand(args, ctx);
     },
+  });
+
+  pi.registerCommand('zen-proxy', {
+    description: 'Manage OpenCode Zen Vercel proxy (alias for /zen)',
+    getArgumentCompletions: getZenCommandCompletions,
     handler: async (args, ctx) => {
       await handleZenProxyCommand(args, ctx);
     },

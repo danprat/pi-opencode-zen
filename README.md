@@ -133,18 +133,23 @@ This extension includes a built-in serverless edge proxy relay inspired by [9rou
 - **Strict proxy mode (`strictProxy`)**: for users in restricted regions who must prevent leaking their real IP, strict mode can be toggled on to forbid direct fallback.
 - **One-click Vercel deployment**: deploy an Edge relay function to your own Vercel account directly from Pi using `/zen-proxy deploy <vercel-token>`.
 
-### Interactive Commands
+### Interactive Commands & Menu
 
-| Command                         | Description                                                           |
-| ------------------------------- | --------------------------------------------------------------------- |
-| `/zen-proxy on`                 | Enable the Vercel relay proxy                                         |
-| `/zen-proxy off`                | Disable the Vercel relay proxy                                        |
-| `/zen-proxy toggle`             | Quick toggle between enabled and disabled states                      |
-| `/zen-proxy set <url>`          | Set your Vercel relay URL (e.g. `https://my-relay.vercel.app`)        |
-| `/zen-proxy status`             | Show proxy state, circuit breaker status, and test relay connectivity |
-| `/zen-proxy fallback [on\|off]` | Enable or disable seamless fallback to direct connection              |
-| `/zen-proxy strict [on\|off]`   | Toggle strict mode (disallow direct fallback)                         |
-| `/zen-proxy deploy [token]`     | Automatically deploy an edge relay to Vercel                          |
+Simply type `/zen` (or `/zen-proxy`) in interactive mode to open the user-friendly management menu, which shows your current relay state, configuration, and one-click actions:
+
+| Command                   | Description                                                           |
+| ------------------------- | --------------------------------------------------------------------- |
+| `/zen`                    | Open the interactive proxy manager menu (TUI mode)                    |
+| `/zen on`                 | Enable the Vercel relay proxy                                         |
+| `/zen off`                | Disable the Vercel relay proxy (use direct connection)                |
+| `/zen toggle`             | Quick toggle between enabled and disabled states                      |
+| `/zen set <url>`          | Set your Vercel relay URL (e.g. `https://my-relay.vercel.app`)        |
+| `/zen status`             | Show proxy state, circuit breaker status, and test relay connectivity |
+| `/zen fallback [on\|off]` | Enable or disable seamless fallback to direct connection              |
+| `/zen strict [on\|off]`   | Toggle strict mode (disallow direct fallback)                         |
+| `/zen deploy [token]`     | Automatically deploy a private edge relay to Vercel                   |
+
+_(Note: `/zen-proxy` is available as a full alias for `/zen`)_
 
 ### Environment Variables & Persistence
 
