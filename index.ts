@@ -1350,8 +1350,8 @@ export async function opencodeZen(pi: ExtensionAPI): Promise<void> {
         : '🔗 Set Relay URL (Enter an existing Vercel relay URL)';
 
       const deployAction = snapshot.relayUrl
-        ? '🚀 Deploy New Relay to Vercel (Replaces current relay using Vercel token)'
-        : '🚀 Deploy New Relay to Vercel (Recommended: auto-creates relay in 10s)';
+        ? '🚀 Sync / Deploy Relay (Checks existing "vercel-zen-relay" or deploys new)'
+        : '🚀 Setup Relay via Vercel Token (Auto-detects "vercel-zen-relay" or creates in 10s)';
 
       const fallbackAction =
         snapshot.fallback && !snapshot.strictProxy
@@ -1415,7 +1415,14 @@ export async function opencodeZen(pi: ExtensionAPI): Promise<void> {
                 onProgress: (msg) => ctx.ui.notify(msg, 'info'),
               });
               updateProxyStatusline(ctx.ui);
-              ctx.ui.notify(`✓ Relay deployed successfully! URL: ${res.deployUrl}`, 'info');
+              if (res.reused) {
+                ctx.ui.notify(
+                  `✓ Found existing project "${res.projectName}"! Connected to: ${res.deployUrl}`,
+                  'info',
+                );
+              } else {
+                ctx.ui.notify(`✓ Relay deployed successfully! URL: ${res.deployUrl}`, 'info');
+              }
             } catch (error) {
               const msg = error instanceof Error ? error.message : String(error);
               ctx.ui.notify(`Vercel deployment failed: ${msg}`, 'error');
@@ -1594,7 +1601,14 @@ export async function opencodeZen(pi: ExtensionAPI): Promise<void> {
             onProgress: (msg) => ctx.ui.notify(msg, 'info'),
           });
           updateProxyStatusline(ctx.ui);
-          ctx.ui.notify(`Vercel relay deployed successfully! URL: ${res.deployUrl}`, 'info');
+          if (res.reused) {
+            ctx.ui.notify(
+              `✓ Found existing project "${res.projectName}"! Connected to: ${res.deployUrl}`,
+              'info',
+            );
+          } else {
+            ctx.ui.notify(`✓ Vercel relay deployed successfully! URL: ${res.deployUrl}`, 'info');
+          }
         } catch (error) {
           const msg = error instanceof Error ? error.message : String(error);
           ctx.ui.notify(`Vercel deployment failed: ${msg}`, 'error');

@@ -467,6 +467,8 @@ export async function proxyAwareFetch(
   }
 }
 
+export const DEFAULT_PROJECT_NAME = 'vercel-zen-relay';
+
 // ─── Automated Vercel Deployment ──────────────────────────────────────────
 
 export interface DeployVercelRelayOptions {
@@ -474,12 +476,76 @@ export interface DeployVercelRelayOptions {
   projectName?: string;
   onProgress?: (message: string) => void;
   maxPollMs?: number;
+  forceDeploy?: boolean;
+  fetchImpl?: typeof globalThis.fetch;
 }
 
 export interface DeployVercelRelayResult {
   deployUrl: string;
   deploymentId: string;
   projectName: string;
+  reused: boolean;
+}
+
+export interface ExistingVercelProject {
+  exists: boolean;
+  deployUrl?: string;
+  deploymentId?: string;
+  projectName?: string;
+  projectId?: string;
+  readyState?: string;
+}
+
+export async function checkExistingVercelProject(
+  token: string,
+  projectName = DEFAULT_PROJECT_NAME,
+  fetchImpl: typeof globalThis.fetch = originalFetch,
+): Promise<ExistingVercelProject> {
+  const trimmedToken = token.trim();
+  if (!trimmedToken) {
+    throw new Error('Vercel API token is required');
+  }
+
+  const res = await fetchImpl(`${VERCEL_API}/v9/projects/${encodeURIComponent(projectName)}`, {
+    headers: { Authorization: `Bearer ${trimmedToken}` },
+  });
+
+  if (res.status === 404) {
+    return { exists: false, projectName };
+  }
+
+  if (!res.ok) {
+    throw new Error(`Failed to check Vercel project status (HTTP ${res.status})`);
+  }
+
+  const data = (await res.json()) as {
+    id?: string;
+    name?: string;
+    targets?: {
+      production?: {
+        id?: string;
+        readyState?: string;
+        url?: string;
+        alias?: string[];
+      };
+    };
+  };
+
+  const prod = data.targets?.production;
+  const isReady = prod?.readyState === 'READY';
+  const hostname = prod?.alias?.[0] || prod?.url;
+  const deployUrl = isReady && hostname ? `https://${hostname}` : undefined;
+
+  const result: ExistingVercelProject = {
+    exists: true,
+    projectName: data.name || projectName,
+  };
+  if (data.id) result.projectId = data.id;
+  if (prod?.id) result.deploymentId = prod.id;
+  if (prod?.readyState) result.readyState = prod.readyState;
+  if (deployUrl) result.deployUrl = deployUrl;
+
+  return result;
 }
 
 async function pollDeployment(
@@ -517,10 +583,35 @@ export async function deployVercelRelay(
     throw new Error('Vercel API token is required');
   }
 
-  const projectName = options.projectName?.trim() || `relay-${Date.now().toString(36)}`;
+  const projectName = options.projectName?.trim() || DEFAULT_PROJECT_NAME;
+  const fetchImpl = options.fetchImpl ?? originalFetch;
+
+  // Check if project already exists and has a ready production deployment
+  if (!options.forceDeploy) {
+    options.onProgress?.(`Checking for existing Vercel project "${projectName}"...`);
+    try {
+      const existing = await checkExistingVercelProject(token, projectName, fetchImpl);
+      if (existing.exists && existing.deployUrl && existing.readyState === 'READY') {
+        options.onProgress?.(
+          `Found existing project "${projectName}". Connecting directly to ${existing.deployUrl}...`,
+        );
+        // Automatically save persistent configuration with the existing relay URL
+        setProxyConfig({ relayUrl: existing.deployUrl, enabled: true });
+        return {
+          deployUrl: existing.deployUrl,
+          deploymentId: existing.deploymentId || '',
+          projectName,
+          reused: true,
+        };
+      }
+    } catch {
+      // If check fails or project is not ready, proceed with deployment
+    }
+  }
+
   options.onProgress?.(`Initiating Vercel deployment for project "${projectName}"...`);
 
-  const deployRes = await originalFetch(`${VERCEL_API}/v13/deployments`, {
+  const deployRes = await fetchImpl(`${VERCEL_API}/v13/deployments`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -572,7 +663,7 @@ export async function deployVercelRelay(
 
   options.onProgress?.('Configuring project settings (disabling SSO deployment protection)...');
   const projectId = deployment.projectId || projectName;
-  await originalFetch(`${VERCEL_API}/v9/projects/${projectId}`, {
+  await fetchImpl(`${VERCEL_API}/v9/projects/${projectId}`, {
     method: 'PATCH',
     headers: {
       Authorization: `Bearer ${token}`,
@@ -599,5 +690,6 @@ export async function deployVercelRelay(
     deployUrl,
     deploymentId,
     projectName,
+    reused: false,
   };
 }

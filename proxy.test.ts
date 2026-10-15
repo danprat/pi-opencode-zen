@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { ExtensionUIContext, ThemeColor } from '@earendil-works/pi-coding-agent';
 import {
+  DEFAULT_PROJECT_NAME,
   RELAY_FUNCTION_CODE,
   buildRelayHeaders,
+  checkExistingVercelProject,
+  deployVercelRelay,
   getProxyConfig,
   getProxyStateSnapshot,
   isOpencodeTarget,
@@ -395,5 +398,81 @@ describe('Proxy-Aware Fetch Routing and Seamless Fallback', () => {
     expect(res.status).toBe(200);
     expect(await res.text()).toBe('relay-ok');
     expect(getProxyStateSnapshot().circuitState).toBe('CLOSED');
+  });
+});
+
+describe('Smart Vercel Project Check and Reuse', () => {
+  it('detects when project does not exist (HTTP 404)', async () => {
+    const mockFetch = (async (url: string) => {
+      expect(url).toContain('/v9/projects/vercel-zen-relay');
+      return new Response('Not Found', { status: 404 });
+    }) as typeof globalThis.fetch;
+
+    const result = await checkExistingVercelProject('fake-token', DEFAULT_PROJECT_NAME, mockFetch);
+    expect(result.exists).toBe(false);
+  });
+
+  it('detects existing project and extracts production URL (HTTP 200)', async () => {
+    const mockFetch = (async (url: string) => {
+      expect(url).toContain('/v9/projects/vercel-zen-relay');
+      return new Response(
+        JSON.stringify({
+          id: 'prj_test123',
+          name: 'vercel-zen-relay',
+          targets: {
+            production: {
+              id: 'dpl_prod456',
+              readyState: 'READY',
+              url: 'vercel-zen-relay-hash.vercel.app',
+              alias: ['vercel-zen-relay.vercel.app'],
+            },
+          },
+        }),
+        { status: 200 },
+      );
+    }) as typeof globalThis.fetch;
+
+    const result = await checkExistingVercelProject('fake-token', DEFAULT_PROJECT_NAME, mockFetch);
+    expect(result.exists).toBe(true);
+    expect(result.deployUrl).toBe('https://vercel-zen-relay.vercel.app');
+    expect(result.deploymentId).toBe('dpl_prod456');
+  });
+
+  it('automatically reuses existing project without rebuilding in deployVercelRelay', async () => {
+    let deploymentCreated = false;
+
+    const mockFetch = (async (url: string) => {
+      if (url.includes('/v9/projects/vercel-zen-relay')) {
+        return new Response(
+          JSON.stringify({
+            id: 'prj_existing',
+            name: 'vercel-zen-relay',
+            targets: {
+              production: {
+                id: 'dpl_existing_ready',
+                readyState: 'READY',
+                alias: ['vercel-zen-relay.vercel.app'],
+              },
+            },
+          }),
+          { status: 200 },
+        );
+      }
+      if (url.includes('/v13/deployments')) {
+        deploymentCreated = true;
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }) as typeof globalThis.fetch;
+
+    const res = await deployVercelRelay({
+      vercelToken: 'test-token',
+      fetchImpl: mockFetch,
+    });
+
+    expect(res.reused).toBe(true);
+    expect(res.deployUrl).toBe('https://vercel-zen-relay.vercel.app');
+    expect(deploymentCreated).toBe(false); // Verified: Zero build calls made!
+    expect(getProxyConfig().relayUrl).toBe('https://vercel-zen-relay.vercel.app');
+    expect(getProxyConfig().enabled).toBe(true);
   });
 });
