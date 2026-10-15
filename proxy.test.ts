@@ -190,6 +190,8 @@ describe('Vercel Edge Relay Function Source', () => {
     expect(RELAY_FUNCTION_CODE).toContain('req.headers.get("x-relay-target")');
     expect(RELAY_FUNCTION_CODE).toContain('req.headers.get("x-relay-path")');
     expect(RELAY_FUNCTION_CODE).toContain('duplex: "half"');
+    expect(RELAY_FUNCTION_CODE).toContain('x-accel-buffering');
+    expect(RELAY_FUNCTION_CODE).toContain('no-transform');
   });
 });
 

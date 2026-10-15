@@ -1,4 +1,4 @@
-import { Type } from '@earendil-works/pi-ai';
+import { Type, createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 import {
   type Api,
   type AssistantMessageEventStream,
@@ -1109,7 +1109,7 @@ export function streamOpencodeZen(
     ...options,
     apiKey: resolvedApiKey,
     headers: { ...options?.headers, ...opencodeHeaders(options?.sessionId, isFree) },
-    fetch: proxyAwareFetch,
+    ...(isProxyActive ? { fetch: proxyAwareFetch } : {}),
     ...(effectiveMaxTokens !== undefined ? { maxTokens: effectiveMaxTokens } : {}),
   };
 
@@ -1133,7 +1133,54 @@ export function streamOpencodeZen(
       if (googleHeaders !== undefined) {
         googleOptions.headers = googleHeaders;
       }
-      return googleGenerativeAIApi().streamSimple(googleModel, gateContext, googleOptions);
+
+      if (!isProxyActive || !proxyConfig.fallback || proxyConfig.strictProxy) {
+        return googleGenerativeAIApi().streamSimple(googleModel, gateContext, googleOptions);
+      }
+
+      // Proxy active with safe fallback: catch early connection/relay errors and fail over to direct
+      const stream = createAssistantMessageEventStream();
+      (async () => {
+        try {
+          const proxyStream = googleGenerativeAIApi().streamSimple(
+            googleModel,
+            gateContext,
+            googleOptions,
+          );
+          let started = false;
+          let failedEarly = false;
+          for await (const event of proxyStream) {
+            if (event.type === 'start' || event.type === 'text_delta') {
+              started = true;
+            }
+            if (event.type === 'error' && !started) {
+              failedEarly = true;
+              break;
+            }
+            stream.push(event);
+          }
+          if (failedEarly) {
+            const directStream = googleGenerativeAIApi().streamSimple(
+              wrappedModel,
+              gateContext,
+              googleOptions,
+            );
+            for await (const event of directStream) {
+              stream.push(event);
+            }
+          }
+        } catch {
+          const directStream = googleGenerativeAIApi().streamSimple(
+            wrappedModel,
+            gateContext,
+            googleOptions,
+          );
+          for await (const event of directStream) {
+            stream.push(event);
+          }
+        }
+      })();
+      return stream;
     }
     case 'openai-responses':
       return openAIResponsesApi().streamSimple(wrappedModel, gateContext, wrappedOptions);

@@ -68,22 +68,25 @@ export default async function handler(req) {
     (url.pathname !== "/api/relay" ? url.pathname + url.search : "/");
   const targetUrl = target.replace(/\\/$/, "") + relayPath;
 
-  const rawHeaders = {};
-  for (const [k, v] of req.headers.entries()) rawHeaders[k] = v;
-  delete rawHeaders["x-relay-target"];
-  delete rawHeaders["x-relay-path"];
-  delete rawHeaders["host"];
+  const headers = new Headers(req.headers);
+  headers.delete("x-relay-target");
+  headers.delete("x-relay-path");
+  headers.delete("host");
 
   const response = await fetch(targetUrl, {
     method: req.method,
-    headers: rawHeaders,
+    headers,
     body: req.method !== "GET" && req.method !== "HEAD" ? req.body : undefined,
     duplex: "half",
   });
 
+  const resHeaders = new Headers(response.headers);
+  resHeaders.set("cache-control", "no-cache, no-transform");
+  resHeaders.set("x-accel-buffering", "no");
+
   return new Response(response.body, {
     status: response.status,
-    headers: response.headers,
+    headers: resHeaders,
   });
 }
 `;
@@ -278,8 +281,9 @@ function recordRelayFailure(): void {
 
 export function isOpencodeTarget(targetUrl: string | URL): boolean {
   try {
-    const parsed = typeof targetUrl === 'string' ? new URL(targetUrl) : targetUrl;
-    return parsed.hostname.includes('opencode.ai');
+    return typeof targetUrl === 'string'
+      ? targetUrl.includes('opencode.ai')
+      : targetUrl.hostname.includes('opencode.ai');
   } catch {
     return false;
   }
@@ -412,6 +416,7 @@ export async function proxyAwareFetch(
       ...init,
       headers: relayHeaders,
       signal: connectController.signal,
+      keepalive: true,
     });
 
     clearTimeout(connectTimeout);
