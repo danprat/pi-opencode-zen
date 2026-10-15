@@ -46,7 +46,9 @@
   },
   "files": [
     "index.ts",
-    "plugins.ts"
+    "plugins.ts",
+    "proxy.ts",
+    "src"
   ],
   "publishConfig": {
     "access": "public"
