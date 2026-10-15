@@ -43,9 +43,11 @@ interface ModelsDevModelInfo {
   } | null;
 }
 
-const API_KEY = 'OPENCODE_API_KEY';
-const BASE_URL = 'https://opencode.ai/zen/v1';
-const MODELS_DEV_URL = 'https://models.dev/api.json';
+export const API_KEY = 'OPENCODE_API_KEY';
+export const DEFAULT_BASE_URL = 'https://opencode.ai/inference/v1';
+export const BASE_URL = process.env['OPENCODE_BASE_URL']?.trim() || DEFAULT_BASE_URL;
+export const FREE_INFERENCE_BASE_URL = 'https://opencode.ai/inference/v1';
+export const MODELS_DEV_URL = 'https://models.dev/api.json';
 
 const OPENAI_RESPONSES_ENDPOINT: EndpointConfig = Object.freeze({
   api: 'openai-responses',
@@ -584,7 +586,7 @@ const MODEL_MAP: Record<string, string> = {
   'longcat-2.5': 'longcat-2.5-preview-free',
 };
 
-function normalizeModelId(rawId: string): string {
+export function normalizeModelId(rawId: string): string {
   const stripped = rawId.replace(/^(opencode\/|oc\/|zen\/)/i, '');
   return MODEL_MAP[stripped] ?? stripped;
 }
@@ -651,7 +653,7 @@ const STATIC_MODELS: ProviderModelConfig[] = allModels.map((m) =>
     { ...m.cost },
     m.contextWindow,
     m.maxTokens,
-    m.id.includes('muse') ? { off: null } : undefined,
+    m.id.includes('muse') ? { off: 'low' } : undefined,
   ),
 );
 
@@ -685,29 +687,38 @@ async function fetchVisibleModelIds(
   apiKey: string,
   signal?: AbortSignal,
 ): Promise<Set<string> | undefined> {
-  try {
-    const init: RequestInit = {
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'User-Agent': USER_AGENT,
-        Accept: 'application/json',
-      },
-    };
-    if (signal) init.signal = signal;
-    const response = await fetch(`${BASE_URL}/models`, init);
-    if (!response.ok) return undefined;
-    const json = (await response.json()) as { data?: Array<{ id?: string }> };
-    return new Set(
-      (json.data ?? [])
-        .map((m) => m.id)
-        .filter(
-          (id): id is string =>
-            typeof id === 'string' && id.length > 0 && !id.toLowerCase().startsWith('jev-'),
-        ),
-    );
-  } catch {
-    return undefined;
+  const isFree = isPublicMode(apiKey);
+  const urls = [
+    `${BASE_URL}/models`,
+    'https://opencode.ai/inference/v1/models',
+    'https://opencode.ai/zen/v1/models',
+  ];
+  for (const url of Array.from(new Set(urls))) {
+    try {
+      const init: RequestInit = {
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'User-Agent': isFree ? USER_AGENT_V2 : USER_AGENT_V1,
+          Accept: 'application/json',
+        },
+      };
+      if (signal) init.signal = signal;
+      const response = await fetch(url, init);
+      if (!response.ok) continue;
+      const json = (await response.json()) as { data?: Array<{ id?: string }> };
+      return new Set(
+        (json.data ?? [])
+          .map((m) => m.id)
+          .filter(
+            (id): id is string =>
+              typeof id === 'string' && id.length > 0 && !id.toLowerCase().startsWith('jev-'),
+          ),
+      );
+    } catch {
+      // try next fallback url
+    }
   }
+  return undefined;
 }
 
 async function fetchModelsDevInfo(
@@ -731,7 +742,7 @@ function isPublicMode(apiKey?: string): boolean {
   return !apiKey || apiKey === 'public';
 }
 
-function isFreeModel(id: string, model?: ModelsDevModelInfo): boolean {
+export function isFreeModel(id: string, model?: ModelsDevModelInfo): boolean {
   const lower = id.toLowerCase();
   if (lower.startsWith('jev-')) return false;
   if (lower.endsWith('-free') || lower.includes('-contributor') || lower === 'big-pickle') {
@@ -763,7 +774,7 @@ function getVisibleModels(
         { ...model.cost },
         model.contextWindow,
         model.maxTokens,
-        model.id.includes('muse') ? { off: null } : undefined,
+        model.id.includes('muse') ? { off: 'low' } : undefined,
       ),
     );
   }
@@ -792,7 +803,7 @@ function getVisibleModels(
             },
             dev.limit?.context ?? (isMuse ? 128000 : 200000),
             dev.limit?.output ?? (isMuse ? 32000 : 64000),
-            isMuse ? { off: null } : undefined,
+            isMuse ? { off: 'low' } : undefined,
           ),
         );
       } else if (!modelMap.has(id)) {
@@ -806,7 +817,7 @@ function getVisibleModels(
             { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
             isMuse ? 128000 : 200000,
             isMuse ? 32000 : 64000,
-            isMuse ? { off: null } : undefined,
+            isMuse ? { off: 'low' } : undefined,
           ),
         );
       }
@@ -830,19 +841,14 @@ function getVisibleModels(
   return models;
 }
 
-const USER_AGENT = 'opencode/1.18.31 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14';
+const USER_AGENT_V2 = 'opencode/latest/2.0.29/cli';
+const USER_AGENT_V1 = 'opencode/1.18.31 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.14';
 const CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
-let lastTimestamp = 0;
-let counter = 0;
 
-function createOpencodeId(descending: boolean, timestamp = Date.now()): string {
-  if (timestamp !== lastTimestamp) {
-    lastTimestamp = timestamp;
-    counter = 0;
-  }
-  counter++;
-  const current = BigInt(timestamp) * 0x1000n + BigInt(counter);
-  const value = descending ? ~current : current;
+export function createOpencodeId(descending: boolean, timestamp = Date.now()): string {
+  // Pinned to counter 1 like the upstream OpenCode CLI; non-small counters trip 403 FreeTierError
+  const current = BigInt(timestamp) * 0x1000n + 1n;
+  const value = descending ? ~current & ((1n << 48n) - 1n) : current & ((1n << 48n) - 1n);
   let time = '';
   for (let i = 0; i < 6; i++) {
     const byte = Number((value >> BigInt(40 - 8 * i)) & 0xffn);
@@ -875,22 +881,87 @@ function getSessionId(callerSessionId?: string): string {
   return existing;
 }
 
-function opencodeHeaders(sessionId?: string): Record<string, string> {
+export function opencodeHeaders(sessionId?: string, isFree = true): Record<string, string> {
+  const session = getSessionId(sessionId);
+  if (isFree) {
+    return {
+      'User-Agent': USER_AGENT_V2,
+      'x-opencode-client': 'cli',
+      'x-opencode-session': session,
+      'x-opencode-session-id': session,
+      'x-session-affinity': session,
+      'x-session-id': session,
+      'x-opencode-project': 'global',
+      Accept: 'text/event-stream',
+    };
+  }
   return {
-    'User-Agent': USER_AGENT,
+    'User-Agent': USER_AGENT_V1,
     'x-opencode-client': 'desktop',
-    'x-opencode-session': getSessionId(sessionId),
+    'x-opencode-session': session,
+    'x-opencode-session-id': session,
+    'x-session-affinity': session,
+    'x-session-id': session,
     'x-opencode-request': 'msg_' + createOpencodeId(false),
     'x-opencode-project': 'global',
     Accept: 'text/event-stream',
   };
 }
 
-const GATE_TOOLS: readonly Tool[] = Object.freeze([
+export const GATE_TOOLS: readonly Tool[] = Object.freeze([
   {
     name: 'read',
-    description: 'Read file',
-    parameters: Type.Object({ path: Type.String() }),
+    description:
+      'Read the contents of a file or directory. Supports text files, images, and PDFs. Images and PDFs are presented directly to the model. Each text line is prefixed by its 1-based line number as <line>: <content>. The prefix is for reference and is not part of the file content. Directory entries are returned one per line. Use offset and limit to read large files or directories in sections. Prefer one larger read over many small slices, and use grep to find specific content in large files.',
+    parameters: Type.Object(
+      {
+        path: Type.String({ description: 'File or directory to read' }),
+        offset: Type.Optional(
+          Type.Integer({
+            minimum: 0,
+            description: 'The line or directory entry to start reading from (1-based)',
+          }),
+        ),
+        limit: Type.Optional(
+          Type.Integer({
+            minimum: 0,
+            description:
+              'The maximum number of lines or directory entries to read (defaults to and capped at 2000)',
+          }),
+        ),
+      },
+      { additionalProperties: false },
+    ),
+  },
+  {
+    name: 'shell',
+    description:
+      'Execute a shell command and return its output. Commands run on Linux using bash. Quote file paths containing spaces or special characters. Prefer dedicated tools over shell commands when possible. When output is large, the full result is saved to a file and a truncated preview is returned. Rely on automatic truncation unless filtering the output is more useful. Commands accept an optional timeout, background commands have no timeout by default. Background commands return immediately, and you will be notified when they complete. DO NOT poll for completion.',
+    parameters: Type.Object(
+      {
+        command: Type.String({ description: 'Shell command string to execute' }),
+        workdir: Type.Optional(
+          Type.String({
+            description:
+              'Working directory to execute the command in. Defaults to the current working directory. When possible, avoid changing directories in the command and set the working directory here instead.',
+          }),
+        ),
+        timeout: Type.Optional(
+          Type.Integer({
+            minimum: 0,
+            description:
+              'Timeout in milliseconds. Set to 0 to disable the timeout. Defaults to 120000 for foreground commands. Background commands have no timeout by default.',
+          }),
+        ),
+        background: Type.Optional(
+          Type.Boolean({
+            description:
+              "Run the command in the background and return immediately (useful for dev servers and long-running builds). You do not need to use '&' at the end of the command when using this parameter. You will be notified when it completes. DO NOT poll for completion.",
+          }),
+        ),
+      },
+      { additionalProperties: false },
+    ),
   },
   {
     name: 'write',
@@ -927,7 +998,7 @@ const GATE_TOOLS: readonly Tool[] = Object.freeze([
   },
 ]);
 
-function ensureOpencodeGateTools(context: TranscriptContext): TranscriptContext {
+export function ensureOpencodeGateTools(context: TranscriptContext): TranscriptContext {
   const messages = [...context.messages];
   const first = messages[0];
 
@@ -937,11 +1008,14 @@ function ensureOpencodeGateTools(context: TranscriptContext): TranscriptContext 
       messages[0] = { ...first, toolsAdded: GATE_TOOLS as Tool[] };
       return { ...context, messages };
     }
-    const existingNames = new Set(existing.map((t) => t.name));
+    // Retain existing tools while ensuring exact gate definitions for read and shell
+    const tools = existing.map((t) => {
+      const gateMatch = GATE_TOOLS.find((g) => g.name === t.name);
+      return gateMatch ?? t;
+    });
+    const existingNames = new Set(tools.map((t) => t.name));
     const missing = GATE_TOOLS.filter((t) => !existingNames.has(t.name));
-    if (missing.length > 0) {
-      messages[0] = { ...first, toolsAdded: [...existing, ...missing] };
-    }
+    messages[0] = { ...first, toolsAdded: [...tools, ...missing] };
   } else {
     messages.unshift({
       role: 'system',
@@ -954,7 +1028,7 @@ function ensureOpencodeGateTools(context: TranscriptContext): TranscriptContext 
   return { ...context, messages };
 }
 
-function getEndpointConfig(modelId: string): EndpointConfig {
+export function getEndpointConfig(modelId: string): EndpointConfig {
   const normalized = normalizeModelId(modelId);
   const direct = endpoints[normalized];
   if (direct) return direct;
@@ -983,14 +1057,6 @@ export function streamOpencodeZen(
   const endpoint = getEndpointConfig(normalizedId);
   const isResponses = endpoint.api === 'openai-responses';
 
-  const wrappedModel = {
-    ...model,
-    id: normalizedId,
-    api: endpoint.api,
-    baseUrl: endpoint.baseUrl,
-    ...(isResponses ? { thinkingLevelMap: { off: null } } : {}),
-  } as Model<Api>;
-
   const resolvedApiKey = options?.apiKey || getEffectiveApiKey();
   const effectiveMaxTokens = computeEffectiveMaxTokens(
     options?.maxTokens,
@@ -998,10 +1064,29 @@ export function streamOpencodeZen(
     options?.reasoning,
   );
 
+  const isFree = isFreeModel(normalizedId) || isPublicMode(resolvedApiKey);
+  // OpenCode v2 moved free inference from /zen/v1 to /inference/v1.
+  // Any free inference request or legacy /zen/v1 URL is directed to /inference/v1.
+  let targetBaseUrl = endpoint.baseUrl;
+  if (isFree || targetBaseUrl.includes('/zen/v1')) {
+    targetBaseUrl = targetBaseUrl.replace(/\/zen\/v1\/?$/, '/inference/v1');
+    if (isFree && !targetBaseUrl.includes('/inference/v1')) {
+      targetBaseUrl = FREE_INFERENCE_BASE_URL;
+    }
+  }
+
+  const wrappedModel = {
+    ...model,
+    id: normalizedId,
+    api: endpoint.api,
+    baseUrl: targetBaseUrl,
+    ...(isResponses ? { thinkingLevelMap: { off: 'low' } } : {}),
+  } as Model<Api>;
+
   const wrappedOptions: SimpleStreamOptions = {
     ...options,
     apiKey: resolvedApiKey,
-    headers: { ...options?.headers, ...opencodeHeaders(options?.sessionId) },
+    headers: { ...options?.headers, ...opencodeHeaders(options?.sessionId, isFree) },
     ...(effectiveMaxTokens !== undefined ? { maxTokens: effectiveMaxTokens } : {}),
   };
 

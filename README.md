@@ -65,7 +65,7 @@ New users can start using OpenCode Zen immediately without configuring an API ke
 
 This extension mirrors OpenCode CLI behaviour as closely as possible:
 
-- it fetches live visible model IDs dynamically from the OpenCode Zen API (`https://opencode.ai/zen/v1/models`)
+- it fetches live visible model IDs dynamically from the OpenCode API (`https://opencode.ai/inference/v1/models`)
 - it synchronises model specifications (context window, token limits, modalities) from `models.dev`
 - it filters out models with `status === "deprecated"`
 - in anonymous/public mode (`key = "public"`), it automatically admits all free-tier and zero-cost models
@@ -78,7 +78,7 @@ This extension mirrors OpenCode CLI behaviour as closely as possible:
 Live model visibility source:
 
 ```bash
-curl -H 'Authorization: Bearer public' https://opencode.ai/zen/v1/models
+curl -H 'Authorization: Bearer public' https://opencode.ai/inference/v1/models
 ```
 
 OpenCode metadata source:

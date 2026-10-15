@@ -28,7 +28,8 @@
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "bun run typecheck && bun run lint && bun run format:check"
+    "test": "bun test",
+    "check": "bun run typecheck && bun run lint && bun run format:check && bun run test"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
