@@ -60,6 +60,7 @@ New users can start using OpenCode Zen immediately without configuring an API ke
 - **Resilient offline cache**: persists discovered models to `~/.pi/agent/cache/opencode-zen-models.json` with a bounded timeout, ensuring Pi-Bolt starts reliably even when offline.
 - **Pi-Bolt AOT optimisations**: monomorphic object shapes, module-level constant hoisting, and streamlined ID generation for maximum runtime performance.
 - **Gate tools**: automatically provides the required desktop compatibility tools (`read`, `write`, `edit`, `bash`, `glob`, `grep`) to satisfy the OpenCode anti-abuse validation check.
+- **Vercel Edge relay proxy**: route requests via a high-performance Vercel Edge relay (based on the 9router architecture) with dynamic on/off toggles, real-time statusline indicators, circuit breaker protection, and seamless automatic direct fallback.
 
 ### Model Filtering and Protocol Routing
 
@@ -116,9 +117,53 @@ You can log in interactively via `/login opencode-zen` in the TUI, or store the 
 pi-bolt --provider opencode-zen --model claude-sonnet-4-6 --api-key your-real-key -p "hello"
 ```
 
+## Vercel Edge Relay Proxy
+
+This extension includes a built-in serverless edge proxy relay inspired by [9router's proxy pool architecture](https://github.com/decolua/9router/blob/master/src/app/api/proxy-pools/vercel-deploy/route.js), designed to bypass IP restrictions and regional blocks.
+
+### Key Capabilities
+
+- **Seamless automatic fallback**: if your Vercel relay times out, crashes, or returns HTTP 502/503/504 errors, requests automatically fall back to direct connection instantly without failing or interrupting the current conversation.
+- **Circuit breaker cooldown**: after 2 consecutive relay failures, the proxy trips into a 60-second cooldown period, preventing latency delays on subsequent requests.
+- **Statusline indicator**: persistent real-time status in the footer status bar:
+  - `⚡ Proxy: ON` (Relay active and healthy)
+  - `⚠️ Proxy: Direct (Fallback)` (Temporarily falling back to direct connection)
+  - `🌐 Proxy: OFF` (Proxy disabled)
+  - `⚠️ Proxy: No URL` (Enabled without a configured relay URL)
+- **Strict proxy mode (`strictProxy`)**: for users in restricted regions who must prevent leaking their real IP, strict mode can be toggled on to forbid direct fallback.
+- **One-click Vercel deployment**: deploy an Edge relay function to your own Vercel account directly from Pi using `/zen-proxy deploy <vercel-token>`.
+
+### Interactive Commands
+
+| Command                         | Description                                                           |
+| ------------------------------- | --------------------------------------------------------------------- |
+| `/zen-proxy on`                 | Enable the Vercel relay proxy                                         |
+| `/zen-proxy off`                | Disable the Vercel relay proxy                                        |
+| `/zen-proxy toggle`             | Quick toggle between enabled and disabled states                      |
+| `/zen-proxy set <url>`          | Set your Vercel relay URL (e.g. `https://my-relay.vercel.app`)        |
+| `/zen-proxy status`             | Show proxy state, circuit breaker status, and test relay connectivity |
+| `/zen-proxy fallback [on\|off]` | Enable or disable seamless fallback to direct connection              |
+| `/zen-proxy strict [on\|off]`   | Toggle strict mode (disallow direct fallback)                         |
+| `/zen-proxy deploy [token]`     | Automatically deploy an edge relay to Vercel                          |
+
+### Environment Variables & Persistence
+
+Proxy settings are persisted across sessions in `~/.pi/agent/opencode-zen-proxy.json`. You can also configure them via environment variables:
+
+```bash
+# Set default relay URL
+export OPENCODE_VERCEL_PROXY_URL=https://my-relay.vercel.app
+
+# Enable or disable by default
+export OPENCODE_VERCEL_PROXY_ENABLED=true
+
+# Enable strict mode (prevent direct fallback)
+export OPENCODE_VERCEL_PROXY_STRICT=false
+```
+
 ## Development
 
 ```bash
-npm install
-npm run check
+bun install
+bun run check
 ```

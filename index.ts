@@ -12,9 +12,28 @@ import {
   openAIResponsesApi,
 } from '@earendil-works/pi-ai/compat';
 import type { RefreshModelsContext } from '@earendil-works/pi-ai';
-import type { ExtensionAPI, ProviderModelConfig } from '@earendil-works/pi-coding-agent';
+import type {
+  ExtensionAPI,
+  ExtensionCommandContext,
+  ExtensionUIContext,
+  ProviderModelConfig,
+} from '@earendil-works/pi-coding-agent';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+  type ProxyStateSnapshot,
+  deployVercelRelay,
+  getProxyStateSnapshot,
+  installProxyFetchInterceptor,
+  originalFetch,
+  renderProxyStatusline,
+  setProxyConfig,
+  subscribeProxyStatus,
+  toggleProxy,
+  uninstallProxyFetchInterceptor,
+} from './proxy.ts';
+
+export * from './proxy.ts';
 
 type Backend =
   'anthropic-messages' | 'google-generative-ai' | 'openai-completions' | 'openai-responses';
@@ -1187,7 +1206,196 @@ export async function refreshModels(context: RefreshModelsContext): Promise<Prov
   return loadDynamicModels(apiKey, context.signal);
 }
 
+export const PROXY_STATUS_KEY = 'opencode-zen-proxy';
+
+let activeUi: ExtensionUIContext | undefined;
+
+export function updateProxyStatusline(
+  ui?: ExtensionUIContext,
+  snapshot: ProxyStateSnapshot = getProxyStateSnapshot(),
+): void {
+  const targetUi = ui ?? activeUi;
+  if (!targetUi) return;
+  targetUi.setStatus(PROXY_STATUS_KEY, renderProxyStatusline(targetUi.theme, snapshot));
+}
+
+subscribeProxyStatus((snapshot) => {
+  if (activeUi) {
+    updateProxyStatusline(activeUi, snapshot);
+  }
+});
+
 export async function opencodeZen(pi: ExtensionAPI): Promise<void> {
+  installProxyFetchInterceptor();
+
+  pi.on('session_start', async (_event, ctx) => {
+    if (ctx.hasUI && ctx.ui) {
+      activeUi = ctx.ui;
+      updateProxyStatusline(ctx.ui);
+    }
+  });
+
+  pi.on('session_shutdown', async () => {
+    activeUi = undefined;
+    uninstallProxyFetchInterceptor();
+  });
+
+  const handleZenProxyCommand = async (
+    args: string,
+    ctx: ExtensionCommandContext,
+  ): Promise<void> => {
+    activeUi = ctx.ui;
+    const parts = args.trim().split(/\s+/).filter(Boolean);
+    const subcommand = parts[0]?.toLowerCase() || 'status';
+
+    switch (subcommand) {
+      case 'on': {
+        const snapshot = setProxyConfig({ enabled: true });
+        updateProxyStatusline(ctx.ui, snapshot);
+        if (!snapshot.relayUrl) {
+          ctx.ui.notify(
+            'Vercel proxy enabled, but no relay URL is set. Use `/zen-proxy set <url>` or `/zen-proxy deploy <token>`.',
+            'warning',
+          );
+        } else {
+          ctx.ui.notify(`Vercel proxy enabled (${snapshot.relayUrl})`, 'info');
+        }
+        break;
+      }
+      case 'off': {
+        const snapshot = setProxyConfig({ enabled: false });
+        updateProxyStatusline(ctx.ui, snapshot);
+        ctx.ui.notify('Vercel proxy disabled', 'info');
+        break;
+      }
+      case 'toggle': {
+        const snapshot = toggleProxy();
+        updateProxyStatusline(ctx.ui, snapshot);
+        ctx.ui.notify(`Vercel proxy ${snapshot.enabled ? 'enabled' : 'disabled'}`, 'info');
+        break;
+      }
+      case 'set': {
+        let url = parts.slice(1).join(' ').trim();
+        if (!url) {
+          url = (await ctx.ui.input('Vercel Relay URL', 'https://your-relay.vercel.app')) || '';
+        }
+        if (!url) {
+          ctx.ui.notify('No URL provided', 'warning');
+          return;
+        }
+        if (!url.startsWith('http://') && !url.startsWith('https://')) {
+          url = `https://${url}`;
+        }
+        const snapshot = setProxyConfig({ relayUrl: url, enabled: true });
+        updateProxyStatusline(ctx.ui, snapshot);
+        ctx.ui.notify(`Vercel relay URL configured to: ${snapshot.relayUrl}`, 'info');
+        break;
+      }
+      case 'fallback': {
+        const option = parts[1]?.toLowerCase();
+        if (option === 'off' || option === 'disable' || option === 'false') {
+          const snapshot = setProxyConfig({ fallback: false, strictProxy: true });
+          updateProxyStatusline(ctx.ui, snapshot);
+          ctx.ui.notify('Strict proxy mode enabled (direct fallback disabled)', 'warning');
+        } else {
+          const snapshot = setProxyConfig({ fallback: true, strictProxy: false });
+          updateProxyStatusline(ctx.ui, snapshot);
+          ctx.ui.notify('Seamless fallback to direct connection enabled', 'info');
+        }
+        break;
+      }
+      case 'strict': {
+        const option = parts[1]?.toLowerCase();
+        if (option === 'on' || option === 'enable' || option === 'true') {
+          const snapshot = setProxyConfig({ fallback: false, strictProxy: true });
+          updateProxyStatusline(ctx.ui, snapshot);
+          ctx.ui.notify('Strict proxy mode enabled (direct fallback disabled)', 'warning');
+        } else {
+          const snapshot = setProxyConfig({ fallback: true, strictProxy: false });
+          updateProxyStatusline(ctx.ui, snapshot);
+          ctx.ui.notify('Strict proxy mode disabled (seamless direct fallback active)', 'info');
+        }
+        break;
+      }
+      case 'deploy': {
+        let token = parts.slice(1).join(' ').trim();
+        if (!token) {
+          token =
+            (await ctx.ui.input(
+              'Deploy Vercel Relay',
+              'Enter your Vercel Personal Access Token',
+            )) || '';
+        }
+        if (!token) {
+          ctx.ui.notify('Deployment cancelled: Vercel API token is required', 'warning');
+          return;
+        }
+        ctx.ui.notify('Starting Vercel relay deployment...', 'info');
+        try {
+          const res = await deployVercelRelay({
+            vercelToken: token,
+            onProgress: (msg) => ctx.ui.notify(msg, 'info'),
+          });
+          updateProxyStatusline(ctx.ui);
+          ctx.ui.notify(`Vercel relay deployed successfully! URL: ${res.deployUrl}`, 'info');
+        } catch (error) {
+          const msg = error instanceof Error ? error.message : String(error);
+          ctx.ui.notify(`Vercel deployment failed: ${msg}`, 'error');
+        }
+        break;
+      }
+      case 'status':
+      default: {
+        const snapshot = getProxyStateSnapshot();
+        updateProxyStatusline(ctx.ui, snapshot);
+
+        const statusLines = [
+          `OpenCode Zen Vercel Proxy:`,
+          `• State: ${snapshot.enabled ? 'ON' : 'OFF'}`,
+          `• Relay URL: ${snapshot.relayUrl || '(not configured)'}`,
+          `• Fallback to Direct: ${snapshot.fallback && !snapshot.strictProxy ? 'Enabled' : 'Disabled (strict)'}`,
+          `• Circuit Breaker: ${snapshot.circuitState}`,
+        ];
+        if (snapshot.isFallbackActive) {
+          statusLines.push(`• Notice: Currently falling back to direct connection`);
+        }
+
+        ctx.ui.notify(statusLines.join('\n'), 'info');
+
+        // Test connectivity if URL is set
+        if (snapshot.relayUrl) {
+          try {
+            const probe = await originalFetch(snapshot.relayUrl, {
+              headers: {
+                'x-relay-target': 'https://opencode.ai',
+                'x-relay-path': '/',
+              },
+              signal: AbortSignal.timeout(6000),
+            });
+            ctx.ui.notify(`Relay connectivity probe: HTTP ${probe.status}`, 'info');
+          } catch (err) {
+            const probeMsg = err instanceof Error ? err.message : String(err);
+            ctx.ui.notify(`Relay connectivity probe failed: ${probeMsg}`, 'warning');
+          }
+        }
+        break;
+      }
+    }
+  };
+
+  pi.registerCommand('zen-proxy', {
+    description:
+      'Manage OpenCode Zen Vercel proxy (on, off, toggle, set, status, deploy, fallback)',
+    getArgumentCompletions: (prefix) => {
+      const subcommands = ['on', 'off', 'toggle', 'status', 'set', 'fallback', 'strict', 'deploy'];
+      const filtered = subcommands.filter((cmd) => cmd.startsWith(prefix.trim().toLowerCase()));
+      return filtered.length > 0 ? filtered.map((cmd) => ({ value: cmd, label: cmd })) : null;
+    },
+    handler: async (args, ctx) => {
+      await handleZenProxyCommand(args, ctx);
+    },
+  });
+
   const apiKey = getEffectiveApiKey();
   const models = await loadDynamicModels(apiKey);
 
