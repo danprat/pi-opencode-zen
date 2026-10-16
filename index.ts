@@ -14,7 +14,7 @@ import {
   openAIResponsesApi,
 } from '@earendil-works/pi-ai/compat';
 import type { ExtensionAPI, ProviderModelConfig } from '@earendil-works/pi-coding-agent';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -74,6 +74,7 @@ const MODELS_URL = 'https://models.opencode.ai/api.json';
 const MODELS_FALLBACK_URL = 'https://models.dev/api.json';
 const OPENCODE_VERSION = '2.0.30';
 const THINKING_LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
+const IDENTIFIER_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
 
 const backendsByNpm: Record<string, Backend> = {
   '@ai-sdk/anthropic': 'anthropic-messages',
@@ -218,10 +219,30 @@ export function projectId(directory: string): string {
   return createHash('sha256').update(`directory:${directory}`).digest('hex');
 }
 
+/**
+ * An OpenCode session identifier (`ses_` + a descending identifier). OpenCode derives these from
+ * the timestamp and a counter; the Zen gateway only serves free models to requests that carry one.
+ */
+export function sessionId(
+  timestamp: number = Date.now(),
+  random: Uint8Array = randomBytes(14),
+): string {
+  const value = ~(BigInt(timestamp) * 0x1000n + 1n);
+  const time = Array.from({ length: 6 }, (_, index) =>
+    Number((value >> BigInt(40 - 8 * index)) & 0xffn)
+      .toString(16)
+      .padStart(2, '0'),
+  ).join('');
+  return `ses_${time}${Array.from(random, (byte) => IDENTIFIER_CHARS[byte % 62]).join('')}`;
+}
+
+const OPENCODE_SESSION = sessionId();
+
 export function opencodeHeaders(directory: string = process.cwd()): Record<string, string> {
   return {
     'User-Agent': `opencode/latest/${OPENCODE_VERSION}/cli`,
     'x-opencode-project': projectId(directory),
+    'x-opencode-session': OPENCODE_SESSION,
   };
 }
 
@@ -244,7 +265,7 @@ export function streamOpencodeZen(
   const wrappedOptions: SimpleStreamOptions = {
     ...options,
     apiKey: resolveApiKey(options?.apiKey),
-    headers: { ...opencodeHeaders(), ...options?.headers },
+    headers: { ...options?.headers, ...opencodeHeaders() },
   };
 
   switch (endpoint.api) {

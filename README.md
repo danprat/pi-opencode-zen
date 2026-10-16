@@ -18,6 +18,7 @@ The extension:
 - adds OpenCode request headers on every `opencode-zen` provider request:
   - `User-Agent` in the OpenCode CLI format
   - `x-opencode-project`
+  - `x-opencode-session` — an OpenCode-format `ses_...` identifier, overriding the id pi sends
 - routes each model to the protocol the OpenCode CLI uses for it:
   - `@ai-sdk/anthropic` → Anthropic Messages
   - `@ai-sdk/google` → Google Generative AI
@@ -25,7 +26,9 @@ The extension:
   - `@ai-sdk/openai` → OpenAI Responses
   - anything else → OpenAI Completions
 
-Pi itself adds `x-opencode-session` and `x-opencode-client` for requests to `opencode.ai`.
+The Zen gateway only serves free models to requests that look like they come from OpenCode, and it
+checks `x-opencode-session`: it must be an OpenCode `ses_...` identifier, not the UUID pi sends by
+default. The extension generates one, so free models work. pi adds `x-opencode-client` itself.
 
 ### Model filtering
 
@@ -53,8 +56,9 @@ export OPENCODE_API_KEY=your-real-key
 ```
 
 Without a key, or with `OPENCODE_API_KEY=public`, the extension uses OpenCode's anonymous
-public key and shows only the free models. The Zen gateway may still reject those free models
-for an anonymous client, in which case a real key is required.
+public key and shows only the free models. The free models work because the extension sends the
+OpenCode client headers above; if OpenCode changes that check, an anonymous client may be rejected
+and a real key will be required.
 
 ### pi auth storage
 

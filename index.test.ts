@@ -11,6 +11,7 @@ import {
   opencodeHeaders,
   projectId,
   resolveApiKey,
+  sessionId,
   streamOpencodeZen,
   thinkingLevelMapFor,
 } from './index.ts';
@@ -201,6 +202,18 @@ test('sends CLI-style user agent and a stable project header', () => {
   assert.equal(headers['User-Agent'], 'opencode/latest/2.0.30/cli');
   assert.equal(headers['x-opencode-project'], projectId('/some/project'));
   assert.notEqual(projectId('/a'), projectId('/b'));
+  assert.match(headers['x-opencode-session']!, /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/);
+});
+
+test('builds descending OpenCode session identifiers', () => {
+  const timestamp = 1_700_000_000_000;
+  const id = sessionId(timestamp, new Uint8Array(14));
+  assert.match(id, /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/);
+
+  const later = sessionId(timestamp + 1, new Uint8Array(14));
+  assert.ok(later.slice(4, 16) < id.slice(4, 16), 'newer identifiers sort lower');
+  const other = sessionId(timestamp, new Uint8Array(14).fill(1));
+  assert.notEqual(other, id, 'random suffix varies');
 });
 
 interface CapturedRequest {
@@ -236,7 +249,10 @@ function chatModel(id: string): Model<Api> {
   } as Model<Api>;
 }
 
-async function capture(modelId: string): Promise<CapturedRequest> {
+async function capture(
+  modelId: string,
+  options: Record<string, unknown> = {},
+): Promise<CapturedRequest> {
   buildModels(catalog, false);
   const captured: CapturedRequest[] = [];
   const stream = streamOpencodeZen(
@@ -246,6 +262,7 @@ async function capture(modelId: string): Promise<CapturedRequest> {
       apiKey: 'public',
       sessionId: 'ses_test',
       fetch: capturingFetch(captured) as never,
+      ...options,
     },
   );
   try {
@@ -274,4 +291,11 @@ test('openai-compatible models target the gateway chat completions path', async 
 test('mistral models reuse the gateway chat completions path', async () => {
   const request = await capture('mistral-large');
   assert.equal(new URL(request.url).pathname, '/inference/openai/v1/chat/completions');
+});
+
+test('sends an OpenCode session id, overriding pi attribution', async () => {
+  const request = await capture('custom-chat', {
+    headers: { 'x-opencode-session': '01a1440f-3a9d-73d0-b3e5-83a2defdc13f' },
+  });
+  assert.match(request.headers['x-opencode-session']!, /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/);
 });
