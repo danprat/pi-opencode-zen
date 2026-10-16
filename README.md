@@ -14,36 +14,33 @@ Pi loads the provider from `./index.ts` and registers an `opencode-zen` provider
 
 The extension:
 
-- supports anonymous mode by using the API key value `public`
+- falls back to OpenCode's anonymous `public` key when no real key is configured
 - adds OpenCode request headers on every `opencode-zen` provider request:
-  - `x-opencode-client`
-  - `x-opencode-session`
+  - `User-Agent` in the OpenCode CLI format
   - `x-opencode-project`
-  - `x-opencode-request`
-- sets the OpenCode CLI-style `User-Agent`
+- routes each model to the protocol the OpenCode CLI uses for it:
+  - `@ai-sdk/anthropic` → Anthropic Messages
+  - `@ai-sdk/google` → Google Generative AI
+  - `@ai-sdk/mistral` → Mistral Conversations
+  - `@ai-sdk/openai` → OpenAI Responses
+  - anything else → OpenAI Completions
+
+Pi itself adds `x-opencode-session` and `x-opencode-client` for requests to `opencode.ai`.
 
 ### Model filtering
 
 This extension mirrors OpenCode CLI behaviour as closely as possible:
 
-- it fetches the live visible model IDs from the OpenCode Zen API
-- it fetches OpenCode provider metadata from `models.dev`
+- it fetches the OpenCode provider catalogue from `https://models.opencode.ai/api.json`
 - it filters out models with `status === "deprecated"`
-- in anonymous/public mode (`key = "public"`), it keeps only models where `models.dev` reports `cost.input === 0`
+- it filters out models that do not support text input and output
+- in anonymous/public mode it keeps only models that have no paid pricing tier
 
-Live model visibility source:
-
-```bash
-curl -H 'Authorization: Bearer public' https://opencode.ai/zen/v1/models
-```
-
-OpenCode metadata source:
+OpenCode catalogue source:
 
 ```bash
-curl https://models.dev/api.json
+curl https://models.opencode.ai/api.json
 ```
-
-The Zen `/models` endpoint does not include pricing or deprecation metadata, so the extension combines both sources.
 
 ## Configuration
 
@@ -55,11 +52,9 @@ Get an API key from OpenCode Zen, then configure pi in one of these ways.
 export OPENCODE_API_KEY=your-real-key
 ```
 
-To use anonymous mode for OpenCode Zen free/public models:
-
-```bash
-export OPENCODE_API_KEY=public
-```
+Without a key, or with `OPENCODE_API_KEY=public`, the extension uses OpenCode's anonymous
+public key and shows only the free models. The Zen gateway may still reject those free models
+for an anonymous client, in which case a real key is required.
 
 ### pi auth storage
 
