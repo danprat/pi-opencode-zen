@@ -12,7 +12,7 @@ Add `-l` to install it in project settings.
 
 ## Usage
 
-Pi loads the provider from `./index.ts` and registers an `opencode-zen` provider that exposes OpenCode Zen models.
+Pi loads the extension from `./index.ts` and registers an `opencode-zen` provider that exposes OpenCode Zen models.
 
 The extension:
 
