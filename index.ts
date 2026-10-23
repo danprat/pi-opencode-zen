@@ -13,7 +13,11 @@ import {
   openAICompletionsApi,
   openAIResponsesApi,
 } from '@earendil-works/pi-ai/compat';
-import type { ExtensionAPI, ProviderModelConfig } from '@earendil-works/pi-coding-agent';
+import {
+  getAgentDir,
+  type ExtensionAPI,
+  type ProviderModelConfig,
+} from '@earendil-works/pi-coding-agent';
 import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -100,12 +104,14 @@ export function endpointFor(
   return { api, baseUrl: baseUrlFor(api, base) };
 }
 
-export function getConfiguredApiKey(env: NodeJS.ProcessEnv = process.env): string | undefined {
+export function getConfiguredApiKey(
+  env: NodeJS.ProcessEnv = process.env,
+  authPath = join(getAgentDir(), 'auth.json'),
+): string | undefined {
   const fromEnv = env[API_KEY_ENV]?.trim();
   if (fromEnv) return fromEnv;
 
   try {
-    const authPath = join(env['HOME'] ?? '', '.pi', 'agent', 'auth.json');
     const auth = JSON.parse(readFileSync(authPath, 'utf8')) as Record<string, { key?: string }>;
     return auth['opencode-zen']?.key?.trim() || undefined;
   } catch {

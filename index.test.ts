@@ -191,10 +191,7 @@ test('treats a missing or public key as anonymous mode', () => {
 
 test('reads the configured key from the environment first', () => {
   assert.equal(getConfiguredApiKey({ OPENCODE_API_KEY: ' sk-env ' }), 'sk-env');
-  assert.equal(
-    getConfiguredApiKey({ HOME: '/nonexistent-home-for-pi-opencode-zen-test' }),
-    undefined,
-  );
+  assert.equal(getConfiguredApiKey({}, '/nonexistent-pi-opencode-zen-test/auth.json'), undefined);
 });
 
 test('sends CLI-style user agent and a stable project header', () => {
