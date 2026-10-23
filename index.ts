@@ -288,7 +288,7 @@ export function streamOpencodeZen(
   }
 }
 
-export default async function (pi: ExtensionAPI): Promise<void> {
+export default async function (pi: ExtensionAPI) {
   const apiKey = getConfiguredApiKey();
   const provider = await fetchModelsDevProvider();
 
