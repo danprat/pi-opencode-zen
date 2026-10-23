@@ -225,10 +225,6 @@ export function projectId(directory: string): string {
   return createHash('sha256').update(`directory:${directory}`).digest('hex');
 }
 
-/**
- * An OpenCode session identifier (`ses_` + a descending identifier). OpenCode derives these from
- * the timestamp and a counter; the Zen gateway only serves free models to requests that carry one.
- */
 export function sessionId(
   timestamp: number = Date.now(),
   random: Uint8Array = randomBytes(14),
