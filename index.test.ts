@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createServer } from 'node:net';
 import test from 'node:test';
 import type { Api, Model, TranscriptContext } from '@earendil-works/pi-ai';
 import {
@@ -8,6 +9,7 @@ import {
   getConfiguredApiKey,
   isFreeModel,
   isPublicMode,
+  opencodeFetch,
   opencodeHeaders,
   projectId,
   resolveApiKey,
@@ -213,20 +215,55 @@ test('builds descending OpenCode session identifiers', () => {
   assert.notEqual(other, id, 'random suffix varies');
 });
 
+function clientHelloCiphers(hello: Buffer): number[] {
+  const sessionIdEnd = 5 + 4 + 2 + 32 + 1 + hello[43]!;
+  const length = hello.readUInt16BE(sessionIdEnd);
+  return Array.from({ length: length / 2 }, (_, index) =>
+    hello.readUInt16BE(sessionIdEnd + 2 + index * 2),
+  );
+}
+
+test('offers the TLS ciphers the OpenCode CLI offers', async () => {
+  const hello = new Promise<Buffer>((resolve) => {
+    const server = createServer((socket) => {
+      socket.once('data', (data: Buffer) => {
+        resolve(data);
+        socket.destroy();
+        server.close();
+      });
+    }).listen(0, '127.0.0.1', () => {
+      const { port } = server.address() as { port: number };
+      opencodeFetch(`https://127.0.0.1:${port}/`).catch(() => {});
+    });
+  });
+  assert.deepEqual(
+    clientHelloCiphers(await hello),
+    [
+      0x1301, 0x1302, 0x1303, 0xc02b, 0xc02f, 0xc02c, 0xc030, 0xcca9, 0xcca8, 0xc009, 0xc013,
+      0xc00a, 0xc014, 0x009c, 0x009d, 0x002f, 0x0035,
+    ],
+  );
+});
+
 interface CapturedRequest {
   url: string;
   headers: Record<string, string>;
+  body: string;
 }
 
 function capturingFetch(captured: CapturedRequest[]) {
-  return async (input: unknown, init?: { headers?: HeadersInit }) => {
+  return async (input: unknown, init?: { headers?: HeadersInit; body?: unknown }) => {
     const url =
       typeof input === 'string'
         ? input
         : input instanceof URL
           ? input.href
           : ((input as { url: string }).url ?? '');
-    captured.push({ url, headers: Object.fromEntries(new Headers(init?.headers).entries()) });
+    captured.push({
+      url,
+      headers: Object.fromEntries(new Headers(init?.headers).entries()),
+      body: typeof init?.body === 'string' ? init.body : '',
+    });
     return new Response('', { status: 401, headers: { 'content-type': 'text/plain' } });
   };
 }
@@ -295,4 +332,10 @@ test('sends an OpenCode session id, overriding pi attribution', async () => {
     headers: { 'x-opencode-session': '01a1440f-3a9d-73d0-b3e5-83a2defdc13f' },
   });
   assert.match(request.headers['x-opencode-session']!, /^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/);
+});
+
+test('adds an OpenCode environment block to the system prompt', async () => {
+  const request = await capture('custom-chat');
+  const env = `<env>\n  Working directory: ${process.cwd()}\n</env>`;
+  assert.ok(request.body.includes(JSON.stringify(env).slice(1, -1)));
 });

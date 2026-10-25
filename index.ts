@@ -3,6 +3,7 @@ import {
   type AssistantMessageEventStream,
   type Model,
   type SimpleStreamOptions,
+  type SystemMessage,
   type ThinkingLevelMap,
   type TranscriptContext,
 } from '@earendil-works/pi-ai';
@@ -21,6 +22,7 @@ import {
 import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { Agent, fetch as undiciFetch } from 'undici';
 
 type Backend =
   | 'anthropic-messages'
@@ -79,6 +81,25 @@ const MODELS_FALLBACK_URL = 'https://models.dev/api.json';
 const OPENCODE_VERSION = '2.0.30';
 const THINKING_LEVELS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const;
 const IDENTIFIER_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
+const OPENCODE_CIPHERS = [
+  'TLS_AES_128_GCM_SHA256',
+  'TLS_AES_256_GCM_SHA384',
+  'TLS_CHACHA20_POLY1305_SHA256',
+  'ECDHE-ECDSA-AES128-GCM-SHA256',
+  'ECDHE-RSA-AES128-GCM-SHA256',
+  'ECDHE-ECDSA-AES256-GCM-SHA384',
+  'ECDHE-RSA-AES256-GCM-SHA384',
+  'ECDHE-ECDSA-CHACHA20-POLY1305',
+  'ECDHE-RSA-CHACHA20-POLY1305',
+  'ECDHE-ECDSA-AES128-SHA',
+  'ECDHE-RSA-AES128-SHA',
+  'ECDHE-ECDSA-AES256-SHA',
+  'ECDHE-RSA-AES256-SHA',
+  'AES128-GCM-SHA256',
+  'AES256-GCM-SHA384',
+  'AES128-SHA',
+  'AES256-SHA',
+].join(':');
 
 const backendsByNpm: Record<string, Backend> = {
   '@ai-sdk/anthropic': 'anthropic-messages',
@@ -248,6 +269,35 @@ export function opencodeHeaders(directory: string = process.cwd()): Record<strin
   };
 }
 
+const opencodeDispatcher = new Agent({ connect: { ciphers: OPENCODE_CIPHERS } });
+
+export const opencodeFetch = ((input: Parameters<typeof undiciFetch>[0], init?: RequestInit) =>
+  undiciFetch(input, {
+    ...(init as Parameters<typeof undiciFetch>[1]),
+    dispatcher: opencodeDispatcher,
+  })) as unknown as typeof globalThis.fetch;
+
+export function withOpencodeEnvironment(
+  context: TranscriptContext,
+  directory: string = process.cwd(),
+): TranscriptContext {
+  const env = `<env>\n  Working directory: ${directory}\n</env>`;
+  const [first, ...rest] = context.messages;
+  const messages =
+    first?.role === 'system'
+      ? [{ ...first, sections: { ...first.sections, 'opencode-env': env } }, ...rest]
+      : [
+          {
+            role: 'system',
+            content: '',
+            sections: { 'opencode-env': env },
+            timestamp: Date.now(),
+          } satisfies SystemMessage,
+          ...context.messages,
+        ];
+  return { ...context, messages } as TranscriptContext;
+}
+
 export function streamOpencodeZen(
   model: Model<Api>,
   context: TranscriptContext,
@@ -267,20 +317,22 @@ export function streamOpencodeZen(
   const wrappedOptions: SimpleStreamOptions = {
     ...options,
     apiKey: resolveApiKey(options?.apiKey),
+    fetch: options?.fetch ?? opencodeFetch,
     headers: { ...options?.headers, ...opencodeHeaders() },
   };
+  const wrappedContext = withOpencodeEnvironment(context);
 
   switch (endpoint.api) {
     case 'anthropic-messages':
-      return anthropicMessagesApi().streamSimple(wrappedModel, context, wrappedOptions);
+      return anthropicMessagesApi().streamSimple(wrappedModel, wrappedContext, wrappedOptions);
     case 'google-generative-ai':
-      return googleGenerativeAIApi().streamSimple(wrappedModel, context, wrappedOptions);
+      return googleGenerativeAIApi().streamSimple(wrappedModel, wrappedContext, wrappedOptions);
     case 'mistral-conversations':
-      return mistralConversationsApi().streamSimple(wrappedModel, context, wrappedOptions);
+      return mistralConversationsApi().streamSimple(wrappedModel, wrappedContext, wrappedOptions);
     case 'openai-responses':
-      return openAIResponsesApi().streamSimple(wrappedModel, context, wrappedOptions);
+      return openAIResponsesApi().streamSimple(wrappedModel, wrappedContext, wrappedOptions);
     case 'openai-completions':
-      return openAICompletionsApi().streamSimple(wrappedModel, context, wrappedOptions);
+      return openAICompletionsApi().streamSimple(wrappedModel, wrappedContext, wrappedOptions);
   }
 }
 
