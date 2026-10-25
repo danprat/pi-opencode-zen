@@ -286,12 +286,13 @@ function chatModel(id: string): Model<Api> {
 async function capture(
   modelId: string,
   options: Record<string, unknown> = {},
+  messages: unknown[] = [],
 ): Promise<CapturedRequest> {
   buildModels(catalog, false);
   const captured: CapturedRequest[] = [];
   const stream = streamOpencodeZen(
     chatModel(modelId),
-    { messages: [] } as unknown as TranscriptContext,
+    { messages } as unknown as TranscriptContext,
     {
       apiKey: 'public',
       sessionId: 'ses_test',
@@ -338,4 +339,36 @@ test('adds an OpenCode environment block to the system prompt', async () => {
   const request = await capture('custom-chat');
   const env = `<env>\n  Working directory: ${process.cwd()}\n</env>`;
   assert.ok(request.body.includes(JSON.stringify(env).slice(1, -1)));
+});
+
+function readTools(body: string): number {
+  const payload = JSON.parse(body) as { tools?: { function: { name: string } }[] };
+  return (payload.tools ?? []).filter((tool) => tool.function.name === 'read').length;
+}
+
+const readTool = { name: 'read', description: 'Read a file', parameters: { type: 'object' } };
+
+test('adds a read tool in public mode when the request lacks one', async () => {
+  const request = await capture('custom-chat');
+  assert.equal(readTools(request.body), 1);
+});
+
+test('adds a read tool in public mode when read was removed', async () => {
+  const request = await capture('custom-chat', {}, [
+    { role: 'system', content: 'base', toolsAdded: [readTool], timestamp: 0 },
+    { role: 'system', content: '', toolsRemoved: [{ name: 'read' }], timestamp: 1 },
+  ]);
+  assert.equal(readTools(request.body), 1);
+});
+
+test('keeps the existing read tool in public mode', async () => {
+  const request = await capture('custom-chat', {}, [
+    { role: 'system', content: 'base', toolsAdded: [readTool], timestamp: 0 },
+  ]);
+  assert.equal(readTools(request.body), 1);
+});
+
+test('does not add a read tool with a real key', async () => {
+  const request = await capture('custom-chat', { apiKey: 'real-key' });
+  assert.equal(readTools(request.body), 0);
 });

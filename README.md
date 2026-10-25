@@ -23,6 +23,7 @@ The extension:
   - `x-opencode-session` — an OpenCode-format `ses_...` identifier, overriding the id pi sends
 - sends requests over TLS with the cipher list the OpenCode CLI (Bun) offers
 - adds an OpenCode-style `<env>` block with the working directory to the system prompt
+- in anonymous/public mode, adds a stub `read` tool marked as unavailable when the request has no `read` tool
 - routes each model to the protocol the OpenCode CLI uses for it:
   - `@ai-sdk/anthropic` → Anthropic Messages
   - `@ai-sdk/google` → Google Generative AI
@@ -38,8 +39,7 @@ checks:
 - the request body: the system prompt must contain an `<env>` block with `Working directory:`, and
   the request must include a tool named `read`
 
-The extension handles the first three, so free models work while pi's `read` tool is enabled. pi
-adds `x-opencode-client` itself.
+The extension handles all of these, so free models work. pi adds `x-opencode-client` itself.
 
 ### Model filtering
 

@@ -5,6 +5,7 @@ import {
   type SimpleStreamOptions,
   type SystemMessage,
   type ThinkingLevelMap,
+  type Tool,
   type TranscriptContext,
 } from '@earendil-works/pi-ai';
 import {
@@ -298,6 +299,30 @@ export function withOpencodeEnvironment(
   return { ...context, messages } as TranscriptContext;
 }
 
+export function withReadTool(context: TranscriptContext): TranscriptContext {
+  const tools = new Set<string>();
+  let last = -1;
+  context.messages.forEach((message, index) => {
+    if (message.role !== 'system') return;
+    last = index;
+    for (const tool of message.toolsAdded ?? []) tools.add(tool.name);
+    for (const tool of message.toolsRemoved ?? []) tools.delete(tool.name);
+  });
+  if (last < 0 || tools.has('read')) return context;
+
+  const stub = {
+    name: 'read',
+    description: 'Unavailable. Do not call this tool.',
+    parameters: { type: 'object', properties: {} },
+  } as unknown as Tool;
+  const messages = context.messages.map((message, index) =>
+    index === last && message.role === 'system'
+      ? { ...message, toolsAdded: [...(message.toolsAdded ?? []), stub] }
+      : message,
+  );
+  return { ...context, messages } as TranscriptContext;
+}
+
 export function streamOpencodeZen(
   model: Model<Api>,
   context: TranscriptContext,
@@ -320,7 +345,10 @@ export function streamOpencodeZen(
     fetch: options?.fetch ?? opencodeFetch,
     headers: { ...options?.headers, ...opencodeHeaders() },
   };
-  const wrappedContext = withOpencodeEnvironment(context);
+  const withEnvironment = withOpencodeEnvironment(context);
+  const wrappedContext = isPublicMode(wrappedOptions.apiKey)
+    ? withReadTool(withEnvironment)
+    : withEnvironment;
 
   switch (endpoint.api) {
     case 'anthropic-messages':
